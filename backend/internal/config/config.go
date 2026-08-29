@@ -15,6 +15,8 @@ type Config struct {
 	RedisAddr   string
 	RedisPass   string
 	JWTSecret   string
+	WebBuildDir string
+	GeocoderURL string
 
 	DefaultCarrierSpeedKMH float64
 	MessageLossProbability float64
@@ -34,6 +36,8 @@ func Load() *Config {
 		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPass:   getEnv("REDIS_PASSWORD", ""),
 		JWTSecret:   getEnv("JWT_SECRET", "dev-secret-change-me"),
+		WebBuildDir: getEnv("WEB_BUILD_DIR", ""),
+		GeocoderURL: getEnv("GEOCODER_URL", "https://nominatim.openstreetmap.org/reverse"),
 
 		DefaultCarrierSpeedKMH: getEnvFloat("DEFAULT_CARRIER_SPEED_KMH", 177),
 		MessageLossProbability: getEnvFloat("MESSAGE_LOSS_PROBABILITY", 0.002),

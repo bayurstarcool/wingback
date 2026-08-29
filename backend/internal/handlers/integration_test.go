@@ -55,6 +55,9 @@ func TestEndToEnd_ComposePersistsAndHubDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create bob: %v", err)
 	}
+	if err := r.UpdateUserLocation(ctx, bob.ID, -7.2575, 112.7521); err != nil {
+		t.Fatalf("set bob location: %v", err)
+	}
 
 	// Subscribe to the message *before* it exists — the hub will
 	// return a channel immediately; the first event we care about
@@ -68,8 +71,7 @@ func TestEndToEnd_ComposePersistsAndHubDelivers(t *testing.T) {
 	body := `{
 		"recipient_id": "` + bob.ID + `",
 		"body": "halo dari alice",
-		"sender_lat": -6.2088, "sender_lng": 106.8456,
-		"recipient_lat": -7.2575, "recipient_lng": 112.7521
+		"sender_lat": -6.2088, "sender_lng": 106.8456
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/messages", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

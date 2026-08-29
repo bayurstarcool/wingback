@@ -9,8 +9,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -29,36 +32,91 @@ func New(pool *pgxpool.Pool) *Repo {
 
 // --- users ---
 
+func usernameFromDisplayName(displayName string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(displayName) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else if unicode.IsSpace(r) || r == '-' {
+			b.WriteByte('_')
+		}
+	}
+	name := strings.Trim(b.String(), "_")
+	if len(name) < 3 {
+		name = "user_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	}
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	return name
+}
+
 func (r *Repo) CreateUser(ctx context.Context, email, passwordHash, displayName string) (*models.User, error) {
+	base := usernameFromDisplayName(displayName)
+	if len(base) > 25 {
+		base = base[:25]
+	}
+	return r.CreateUserWithUsername(ctx, email, passwordHash, displayName, base+"_"+strings.ReplaceAll(uuid.NewString()[:6], "-", ""))
+}
+
+func (r *Repo) CreateUserWithUsername(ctx context.Context, email, passwordHash, displayName, username string) (*models.User, error) {
 	row := r.Pool.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, display_name)
-		VALUES ($1, $2, $3)
-		RETURNING id, email, password_hash, display_name, COALESCE(avatar_url, ''), currency,
-		          last_lat, last_lng, created_at, updated_at
-	`, email, passwordHash, displayName)
+		INSERT INTO users (email, username, password_hash, display_name)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, email, username, password_hash, display_name, COALESCE(avatar_url, ''), currency,
+		          last_lat, last_lng, last_location_at, last_location_accuracy_m, created_at, updated_at
+	`, email, username, passwordHash, displayName)
 
 	u := &models.User{}
-	var lastLat, lastLng *float64
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
-		&u.Currency, &lastLat, &lastLng, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var lastLat, lastLng, accuracy *float64
+	var locationAt *time.Time
+	if err := row.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
+		&u.Currency, &lastLat, &lastLng, &locationAt, &accuracy, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
 	u.LastLat = lastLat
 	u.LastLng = lastLng
+	u.LastLocationAt = locationAt
+	u.LastLocationAccuracyM = accuracy
+	return u, nil
+}
+
+func (r *Repo) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
+	row := r.Pool.QueryRow(ctx, `
+		SELECT id, email, username, password_hash, display_name, COALESCE(avatar_url, ''),
+		       currency, last_lat, last_lng, last_location_at, last_location_accuracy_m, created_at, updated_at
+		FROM users WHERE username = $1
+	`, username)
+
+	u := &models.User{}
+	var lastLat, lastLng, accuracy *float64
+	var locationAt *time.Time
+	if err := row.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
+		&u.Currency, &lastLat, &lastLng, &locationAt, &accuracy, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("select user: %w", err)
+	}
+	u.LastLat = lastLat
+	u.LastLng = lastLng
+	u.LastLocationAt = locationAt
+	u.LastLocationAccuracyM = accuracy
 	return u, nil
 }
 
 func (r *Repo) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	row := r.Pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, COALESCE(avatar_url, ''), currency,
-		       last_lat, last_lng, created_at, updated_at
+		SELECT id, email, username, password_hash, display_name, COALESCE(avatar_url, ''), currency,
+		       last_lat, last_lng, last_location_at, last_location_accuracy_m, created_at, updated_at
 		FROM users WHERE email = $1
 	`, email)
 
 	u := &models.User{}
-	var lastLat, lastLng *float64
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
-		&u.Currency, &lastLat, &lastLng, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var lastLat, lastLng, accuracy *float64
+	var locationAt *time.Time
+	if err := row.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
+		&u.Currency, &lastLat, &lastLng, &locationAt, &accuracy, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -66,20 +124,23 @@ func (r *Repo) GetUserByEmail(ctx context.Context, email string) (*models.User, 
 	}
 	u.LastLat = lastLat
 	u.LastLng = lastLng
+	u.LastLocationAt = locationAt
+	u.LastLocationAccuracyM = accuracy
 	return u, nil
 }
 
 func (r *Repo) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	row := r.Pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, display_name, COALESCE(avatar_url, ''), currency,
-		       last_lat, last_lng, created_at, updated_at
+		SELECT id, email, username, password_hash, display_name, COALESCE(avatar_url, ''), currency,
+		       last_lat, last_lng, last_location_at, last_location_accuracy_m, created_at, updated_at
 		FROM users WHERE id = $1
 	`, id)
 
 	u := &models.User{}
-	var lastLat, lastLng *float64
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
-		&u.Currency, &lastLat, &lastLng, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var lastLat, lastLng, accuracy *float64
+	var locationAt *time.Time
+	if err := row.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
+		&u.Currency, &lastLat, &lastLng, &locationAt, &accuracy, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -87,17 +148,58 @@ func (r *Repo) GetUserByID(ctx context.Context, id string) (*models.User, error)
 	}
 	u.LastLat = lastLat
 	u.LastLng = lastLng
+	u.LastLocationAt = locationAt
+	u.LastLocationAccuracyM = accuracy
 	return u, nil
 }
 
-func (r *Repo) UpdateUserLocation(ctx context.Context, id string, lat, lng float64) error {
+func (r *Repo) UpdateUserLocation(ctx context.Context, id string, lat, lng float64, accuracy ...*float64) error {
+	var accuracyM *float64
+	if len(accuracy) > 0 {
+		accuracyM = accuracy[0]
+	}
 	_, err := r.Pool.Exec(ctx, `
-		UPDATE users SET last_lat = $1, last_lng = $2, updated_at = now() WHERE id = $3
-	`, lat, lng, id)
+		UPDATE users SET last_lat = $1, last_lng = $2, last_location_at = now(),
+		last_location_accuracy_m = $4, updated_at = now() WHERE id = $3
+	`, lat, lng, id, accuracyM)
 	if err != nil {
 		return fmt.Errorf("update location: %w", err)
 	}
 	return nil
+}
+
+// --- user discovery ---
+
+func (r *Repo) SearchUsers(ctx context.Context, query string, limit int) ([]models.User, error) {
+	rows, err := r.Pool.Query(ctx, `
+		SELECT id, email, username, password_hash, display_name, COALESCE(avatar_url, ''), currency,
+		       last_lat, last_lng, last_location_at, last_location_accuracy_m, created_at, updated_at
+		FROM users
+		WHERE (username ILIKE $1 OR display_name ILIKE $1)
+		ORDER BY display_name ASC
+		LIMIT $2
+	`, "%"+query+"%", limit)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]models.User, 0)
+	for rows.Next() {
+		u := models.User{}
+		var lastLat, lastLng, accuracy *float64
+		var locationAt *time.Time
+		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.DisplayName, &u.AvatarURL,
+			&u.Currency, &lastLat, &lastLng, &locationAt, &accuracy, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		u.LastLat = lastLat
+		u.LastLng = lastLng
+		u.LastLocationAt = locationAt
+		u.LastLocationAccuracyM = accuracy
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 // --- carriers ---
@@ -164,14 +266,14 @@ func (r *Repo) CreateMessage(ctx context.Context, m *models.Message) error {
 	row := r.Pool.QueryRow(ctx, `
 		INSERT INTO messages (
 			sender_id, recipient_id, carrier_id, body,
-			sender_lat, sender_lng, recipient_lat, recipient_lng,
-			distance_km, speed_kmh, status, departs_at, arrives_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+			distance_km, speed_kmh, status, departs_at, arrives_at, location_privacy
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING id, created_at
 	`,
 		m.SenderID, m.RecipientID, m.CarrierID, m.Body,
-		m.SenderLat, m.SenderLng, m.RecLat, m.RecLng,
-		m.DistanceKM, m.SpeedKMH, m.Status, m.DepartsAt, m.ArrivesAt,
+		m.SenderLat, m.SenderLng, m.RecLat, m.RecLng, m.SenderCity, m.RecipientCity,
+		m.DistanceKM, m.SpeedKMH, m.Status, m.DepartsAt, m.ArrivesAt, m.LocationPrivacy,
 	)
 	if err := row.Scan(&m.ID, &m.CreatedAt); err != nil {
 		return fmt.Errorf("insert message: %w", err)
@@ -182,17 +284,17 @@ func (r *Repo) CreateMessage(ctx context.Context, m *models.Message) error {
 func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	row := r.Pool.QueryRow(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng,
-		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, created_at
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages WHERE id = $1
 	`, id)
 
 	m := &models.Message{}
 	var deliveredAt *time.Time
 	if err := row.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.CarrierID, &m.Body,
-		&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng,
+		&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng, &m.SenderCity, &m.RecipientCity,
 		&m.DistanceKM, &m.SpeedKMH, &m.Status, &m.DepartsAt, &m.ArrivesAt,
-		&deliveredAt, &m.SpeedupsUsed, &m.CreatedAt); err != nil {
+		&deliveredAt, &m.SpeedupsUsed, &m.LocationPrivacy, &m.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -205,8 +307,8 @@ func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, erro
 func (r *Repo) ListInbox(ctx context.Context, userID string, limit int) ([]models.Message, error) {
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng,
-		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, created_at
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE recipient_id = $1
 		ORDER BY created_at DESC
@@ -217,8 +319,8 @@ func (r *Repo) ListInbox(ctx context.Context, userID string, limit int) ([]model
 func (r *Repo) ListSent(ctx context.Context, userID string, limit int) ([]models.Message, error) {
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng,
-		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, created_at
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE sender_id = $1
 		ORDER BY created_at DESC
@@ -238,9 +340,9 @@ func (r *Repo) listMessages(ctx context.Context, sql string, args ...any) ([]mod
 		m := models.Message{}
 		var deliveredAt *time.Time
 		if err := rows.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.CarrierID, &m.Body,
-			&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng,
+			&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng, &m.SenderCity, &m.RecipientCity,
 			&m.DistanceKM, &m.SpeedKMH, &m.Status, &m.DepartsAt, &m.ArrivesAt,
-			&deliveredAt, &m.SpeedupsUsed, &m.CreatedAt); err != nil {
+			&deliveredAt, &m.SpeedupsUsed, &m.LocationPrivacy, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.DeliveredAt = deliveredAt

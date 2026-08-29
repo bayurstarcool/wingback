@@ -13,6 +13,7 @@ import (
 	"github.com/bayurstarcool/wingback/backend/internal/config"
 	"github.com/bayurstarcool/wingback/backend/internal/delivery"
 	"github.com/bayurstarcool/wingback/backend/internal/hub"
+	"github.com/bayurstarcool/wingback/backend/internal/location"
 	"github.com/bayurstarcool/wingback/backend/internal/middleware"
 	"github.com/bayurstarcool/wingback/backend/internal/models"
 	"github.com/bayurstarcool/wingback/backend/internal/repo"
@@ -21,29 +22,36 @@ import (
 )
 
 type MessageHandler struct {
-	cfg  *config.Config
-	repo *repo.Repo
-	hub  *hub.Hub
-	rng  *rand.Rand
+	cfg          *config.Config
+	repo         *repo.Repo
+	hub          *hub.Hub
+	rng          *rand.Rand
+	cityResolver location.Resolver
 }
 
 func NewMessageHandler(cfg *config.Config, r *repo.Repo, h *hub.Hub) *MessageHandler {
 	return &MessageHandler{
-		cfg:  cfg,
-		repo: r,
-		hub:  h,
-		rng:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		cfg:          cfg,
+		repo:         r,
+		hub:          h,
+		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
+		cityResolver: location.NewNominatimResolver(cfg.GeocoderURL),
 	}
 }
 
+func NewMessageHandlerWithResolver(cfg *config.Config, r *repo.Repo, h *hub.Hub, resolver location.Resolver) *MessageHandler {
+	result := NewMessageHandler(cfg, r, h)
+	result.cityResolver = resolver
+	return result
+}
+
 type composeRequest struct {
-	RecipientID  string  `json:"recipient_id" validate:"required"`
-	Body         string  `json:"body" validate:"required,max=2000"`
-	CarrierSlug  string  `json:"carrier_slug"`
-	SenderLat    float64 `json:"sender_lat" validate:"required"`
-	SenderLng    float64 `json:"sender_lng" validate:"required"`
-	RecipientLat float64 `json:"recipient_lat" validate:"required"`
-	RecipientLng float64 `json:"recipient_lng" validate:"required"`
+	RecipientID     string  `json:"recipient_id" validate:"required"`
+	Body            string  `json:"body" validate:"required,max=2000"`
+	CarrierSlug     string  `json:"carrier_slug"`
+	LocationPrivacy string  `json:"location_privacy"`
+	SenderLat       float64 `json:"sender_lat" validate:"required"`
+	SenderLng       float64 `json:"sender_lng" validate:"required"`
 }
 
 type composeResponse struct {
@@ -69,6 +77,22 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 	if req.Body == "" || req.RecipientID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "recipient_id and body are required")
 	}
+	if req.LocationPrivacy == "" {
+		req.LocationPrivacy = models.LocationPrivacyAccurate
+	}
+	if req.LocationPrivacy != models.LocationPrivacyAccurate && req.LocationPrivacy != models.LocationPrivacyHidden {
+		return echo.NewHTTPError(http.StatusBadRequest, "location_privacy must be accurate or hidden")
+	}
+	recipient, err := h.repo.GetUserByID(c.Request().Context(), req.RecipientID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "recipient not found")
+	}
+	if recipient.LastLat == nil || recipient.LastLng == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "recipient has not set a delivery location")
+	}
+	if recipient.LastLocationAt == nil || time.Since(*recipient.LastLocationAt) > 30*24*time.Hour {
+		return echo.NewHTTPError(http.StatusBadRequest, "recipient delivery location is outdated")
+	}
 
 	// Look up carrier (default if not specified).
 	carrier, err := h.repo.GetCarrierBySlug(c.Request().Context(), strings.TrimSpace(req.CarrierSlug))
@@ -80,7 +104,21 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 	}
 
 	from := delivery.Coordinates{Lat: req.SenderLat, Lng: req.SenderLng}
-	to := delivery.Coordinates{Lat: req.RecipientLat, Lng: req.RecipientLng}
+	to := delivery.Coordinates{Lat: *recipient.LastLat, Lng: *recipient.LastLng}
+	var senderCity, recipientCity string
+	if req.LocationPrivacy == models.LocationPrivacyHidden {
+		if h.cityResolver == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "private city labels unavailable")
+		}
+		senderCity, err = h.cityResolver.ResolveCity(c.Request().Context(), req.SenderLat, req.SenderLng)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "private city label unavailable for sender location")
+		}
+		recipientCity, err = h.cityResolver.ResolveCity(c.Request().Context(), *recipient.LastLat, *recipient.LastLng)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "private city label unavailable for recipient location")
+		}
+	}
 
 	plan := delivery.Compute(from, to, carrier.SpeedKMH, h.cfg.MessageLossProbability, time.Now(), h.rng)
 
@@ -89,25 +127,23 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "cannot send a message to yourself")
 	}
 
-	// Verify recipient exists.
-	if _, err := h.repo.GetUserByID(c.Request().Context(), req.RecipientID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "recipient not found")
-	}
-
 	msg := &models.Message{
-		ID:          uuid.NewString(),
-		SenderID:    uid,
-		RecipientID: req.RecipientID,
-		CarrierID:   carrier.ID,
-		Body:        req.Body,
-		SenderLat:   req.SenderLat,
-		SenderLng:   req.SenderLng,
-		RecLat:      req.RecipientLat,
-		RecLng:      req.RecipientLng,
-		DistanceKM:  plan.DistanceKM,
-		SpeedKMH:    plan.SpeedKMH,
-		DepartsAt:   plan.DepartsAt,
-		ArrivesAt:   plan.ArrivesAt,
+		ID:              uuid.NewString(),
+		SenderID:        uid,
+		RecipientID:     req.RecipientID,
+		CarrierID:       carrier.ID,
+		Body:            req.Body,
+		SenderLat:       req.SenderLat,
+		SenderLng:       req.SenderLng,
+		RecLat:          *recipient.LastLat,
+		RecLng:          *recipient.LastLng,
+		DistanceKM:      plan.DistanceKM,
+		SpeedKMH:        plan.SpeedKMH,
+		DepartsAt:       plan.DepartsAt,
+		ArrivesAt:       plan.ArrivesAt,
+		LocationPrivacy: req.LocationPrivacy,
+		SenderCity:      senderCity,
+		RecipientCity:   recipientCity,
 	}
 	if plan.WillBeLost {
 		msg.Status = models.StatusInTransit // will be marked lost by tracker
@@ -134,30 +170,93 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 }
 
 type messageDTO struct {
-	ID          string     `json:"id"`
-	SenderID    string     `json:"sender_id"`
-	RecipientID string     `json:"recipient_id"`
-	Body        string     `json:"body"`
-	DistanceKM  float64    `json:"distance_km"`
-	SpeedKMH    float64    `json:"speed_kmh"`
-	Status      string     `json:"status"`
-	DepartsAt   time.Time  `json:"departs_at"`
-	ArrivesAt   time.Time  `json:"arrives_at"`
-	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+	ID              string     `json:"id"`
+	SenderID        string     `json:"sender_id"`
+	RecipientID     string     `json:"recipient_id"`
+	Body            string     `json:"body"`
+	SenderLat       *float64   `json:"sender_lat,omitempty"`
+	SenderLng       *float64   `json:"sender_lng,omitempty"`
+	RecipientLat    *float64   `json:"recipient_lat,omitempty"`
+	RecipientLng    *float64   `json:"recipient_lng,omitempty"`
+	LocationPrivacy string     `json:"location_privacy"`
+	SenderCity      string     `json:"from_label,omitempty"`
+	RecipientCity   string     `json:"to_label,omitempty"`
+	SameCity        bool       `json:"same_city"`
+	DistanceKM      float64    `json:"distance_km"`
+	SpeedKMH        float64    `json:"speed_kmh"`
+	Status          string     `json:"status"`
+	DepartsAt       time.Time  `json:"departs_at"`
+	ArrivesAt       time.Time  `json:"arrives_at"`
+	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
+}
+
+func publicRoute(m models.Message) (*float64, *float64, *float64, *float64) {
+	if m.LocationPrivacy == models.LocationPrivacyHidden {
+		return nil, nil, nil, nil
+	}
+	return &m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng
+}
+
+type streamEvent struct {
+	Type      string    `json:"type"`
+	MessageID string    `json:"message_id"`
+	Lat       *float64  `json:"lat,omitempty"`
+	Lng       *float64  `json:"lng,omitempty"`
+	Progress  float64   `json:"progress,omitempty"`
+	Phase     string    `json:"phase,omitempty"`
+	At        time.Time `json:"at"`
+}
+
+func streamPayload(m models.Message, e hub.Event) streamEvent {
+	if m.LocationPrivacy != models.LocationPrivacyHidden {
+		return streamEvent{Type: e.Type, MessageID: e.MessageID, Lat: &e.Lat, Lng: &e.Lng, At: e.At}
+	}
+	progress := 0.0
+	if !m.DepartsAt.IsZero() && m.ArrivesAt.After(m.DepartsAt) {
+		progress = float64(e.At.Sub(m.DepartsAt)) / float64(m.ArrivesAt.Sub(m.DepartsAt))
+	}
+	if e.Type == "arrived" || e.Type == "delivered" {
+		progress = 1
+	}
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	phase := "Berangkat"
+	if progress >= 0.72 {
+		phase = "Mendekati tujuan"
+	} else if progress >= 0.18 {
+		phase = "Sedang melintas"
+	}
+	if e.Type == "lost" {
+		phase = "Perjalanan terhenti"
+	}
+	return streamEvent{Type: "progress", MessageID: e.MessageID, Progress: progress, Phase: phase, At: e.At}
 }
 
 func toDTO(m models.Message) messageDTO {
+	senderLat, senderLng, recipientLat, recipientLng := publicRoute(m)
 	return messageDTO{
-		ID:          m.ID,
-		SenderID:    m.SenderID,
-		RecipientID: m.RecipientID,
-		Body:        m.Body,
-		DistanceKM:  m.DistanceKM,
-		SpeedKMH:    m.SpeedKMH,
-		Status:      string(m.Status),
-		DepartsAt:   m.DepartsAt,
-		ArrivesAt:   m.ArrivesAt,
-		DeliveredAt: m.DeliveredAt,
+		ID:              m.ID,
+		SenderID:        m.SenderID,
+		RecipientID:     m.RecipientID,
+		Body:            m.Body,
+		SenderLat:       senderLat,
+		SenderLng:       senderLng,
+		RecipientLat:    recipientLat,
+		RecipientLng:    recipientLng,
+		LocationPrivacy: m.LocationPrivacy,
+		SenderCity:      m.SenderCity,
+		RecipientCity:   m.RecipientCity,
+		SameCity:        location.SameCity(m.SenderCity, m.RecipientCity),
+		DistanceKM:      m.DistanceKM,
+		SpeedKMH:        m.SpeedKMH,
+		Status:          string(m.Status),
+		DepartsAt:       m.DepartsAt,
+		ArrivesAt:       m.ArrivesAt,
+		DeliveredAt:     m.DeliveredAt,
 	}
 }
 
@@ -209,6 +308,38 @@ func (h *MessageHandler) GetMessage(c echo.Context) error {
 	return c.JSON(http.StatusOK, toDTO(*m))
 }
 
+func (h *MessageHandler) SearchUsers(c echo.Context) error {
+	query := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(c.QueryParam("q")), "@"))
+	if len(query) < 2 {
+		return c.JSON(http.StatusOK, []any{})
+	}
+	users, err := h.repo.SearchUsers(c.Request().Context(), query, 8)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	type userDTO struct {
+		ID            string `json:"id"`
+		Username      string `json:"username"`
+		DisplayName   string `json:"display_name"`
+		Email         string `json:"email"`
+		LocationReady bool   `json:"location_ready"`
+	}
+	out := make([]userDTO, 0, len(users))
+	for _, u := range users {
+		ready := u.LastLat != nil && u.LastLng != nil && u.LastLocationAt != nil && time.Since(*u.LastLocationAt) <= 30*24*time.Hour
+		out = append(out, userDTO{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: maskEmail(u.Email), LocationReady: ready})
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+func maskEmail(email string) string {
+	parts := strings.SplitN(email, "@", 2)
+	if len(parts) != 2 || len(parts[0]) < 2 {
+		return email
+	}
+	return parts[0][:1] + "***@" + parts[1]
+}
+
 func (h *MessageHandler) ListCarriers(c echo.Context) error {
 	carriers, err := h.repo.ListCarriers(c.Request().Context())
 	if err != nil {
@@ -240,8 +371,9 @@ func (h *MessageHandler) UpdateLocation(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "missing auth")
 	}
 	var req struct {
-		Lat float64 `json:"lat"`
-		Lng float64 `json:"lng"`
+		Lat       float64  `json:"lat"`
+		Lng       float64  `json:"lng"`
+		AccuracyM *float64 `json:"accuracy_m"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -249,7 +381,7 @@ func (h *MessageHandler) UpdateLocation(c echo.Context) error {
 	if req.Lat < -90 || req.Lat > 90 || req.Lng < -180 || req.Lng > 180 {
 		return echo.NewHTTPError(http.StatusBadRequest, "lat must be [-90,90], lng [-180,180]")
 	}
-	if err := h.repo.UpdateUserLocation(c.Request().Context(), uid, req.Lat, req.Lng); err != nil {
+	if err := h.repo.UpdateUserLocation(c.Request().Context(), uid, req.Lat, req.Lng, req.AccuracyM); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -301,16 +433,13 @@ func (h *MessageHandler) Stream(c echo.Context) error {
 				delivery.Coordinates{Lat: m.RecLat, Lng: m.RecLng},
 				frac,
 			)
-			payload, _ := json.Marshal(hub.Event{
-				Type: "position", MessageID: m.ID, Lat: lat, Lng: lng, At: now,
-			})
+			e := streamPayload(*m, hub.Event{Type: "position", MessageID: m.ID, Lat: lat, Lng: lng, At: now})
+			payload, _ := json.Marshal(e)
 			_ = conn.WriteMessage(websocket.TextMessage, payload)
 		}
 	} else {
-		payload, _ := json.Marshal(hub.Event{
-			Type: string(m.Status), MessageID: m.ID,
-			Lat: m.RecLat, Lng: m.RecLng, At: time.Now(),
-		})
+		e := streamPayload(*m, hub.Event{Type: string(m.Status), MessageID: m.ID, Lat: m.RecLat, Lng: m.RecLng, At: time.Now()})
+		payload, _ := json.Marshal(e)
 		_ = conn.WriteMessage(websocket.TextMessage, payload)
 	}
 
@@ -329,8 +458,11 @@ func (h *MessageHandler) Stream(c echo.Context) error {
 		select {
 		case <-done:
 			return nil
-		case e := <-events:
-			payload, _ := json.Marshal(e)
+		case e, ok := <-events:
+			if !ok {
+				return nil
+			}
+			payload, _ := json.Marshal(streamPayload(*m, e))
 			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 				return nil
 			}

@@ -6,16 +6,19 @@ package models
 import "time"
 
 type User struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	DisplayName  string
-	AvatarURL    string
-	Currency     int
-	LastLat      *float64
-	LastLng      *float64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                    string
+	Email                 string
+	Username              string
+	PasswordHash          string
+	DisplayName           string
+	AvatarURL             string
+	Currency              int
+	LastLat               *float64
+	LastLng               *float64
+	LastLocationAt        *time.Time
+	LastLocationAccuracyM *float64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type Carrier struct {
@@ -38,21 +41,29 @@ const (
 )
 
 type Message struct {
-	ID           string
-	SenderID     string
-	RecipientID  string
-	CarrierID    string
-	Body         string
-	SenderLat    float64
-	SenderLng    float64
-	RecLat       float64
-	RecLng       float64
-	DistanceKM   float64
-	SpeedKMH     float64
-	Status       MessageStatus
-	DepartsAt    time.Time
-	ArrivesAt    time.Time
-	DeliveredAt  *time.Time
-	SpeedupsUsed int
-	CreatedAt    time.Time
+	ID              string
+	SenderID        string
+	RecipientID     string
+	CarrierID       string
+	Body            string
+	SenderLat       float64
+	SenderLng       float64
+	RecLat          float64
+	RecLng          float64
+	DistanceKM      float64
+	SpeedKMH        float64
+	Status          MessageStatus
+	DepartsAt       time.Time
+	ArrivesAt       time.Time
+	DeliveredAt     *time.Time
+	SpeedupsUsed    int
+	LocationPrivacy string
+	SenderCity      string
+	RecipientCity   string
+	CreatedAt       time.Time
 }
+
+const (
+	LocationPrivacyAccurate = "accurate"
+	LocationPrivacyHidden   = "hidden"
+)

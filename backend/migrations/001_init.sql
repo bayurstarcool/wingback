@@ -6,12 +6,15 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE users (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email         TEXT UNIQUE NOT NULL,
+    username      TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     display_name  TEXT NOT NULL,
     avatar_url    TEXT,
     currency      INTEGER NOT NULL DEFAULT 0,
     last_lat      DOUBLE PRECISION,
     last_lng      DOUBLE PRECISION,
+    last_location_at TIMESTAMPTZ,
+    last_location_accuracy_m DOUBLE PRECISION,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -46,6 +49,8 @@ CREATE TABLE messages (
     sender_lng      DOUBLE PRECISION NOT NULL,
     recipient_lat   DOUBLE PRECISION NOT NULL,
     recipient_lng   DOUBLE PRECISION NOT NULL,
+    sender_city     TEXT,
+    recipient_city  TEXT,
     distance_km     DOUBLE PRECISION NOT NULL,
     speed_kmh       DOUBLE PRECISION NOT NULL,
     status          TEXT NOT NULL DEFAULT 'in_transit', -- in_transit, delivered, lost
@@ -53,6 +58,7 @@ CREATE TABLE messages (
     arrives_at      TIMESTAMPTZ NOT NULL,
     delivered_at    TIMESTAMPTZ,
     speedups_used   INTEGER NOT NULL DEFAULT 0,
+    location_privacy TEXT NOT NULL DEFAULT 'accurate' CHECK (location_privacy IN ('accurate', 'hidden')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -1,6 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
-import adapter from '@sveltejs/adapter-node';
+import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
@@ -13,8 +13,13 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 
-			// Self-hosted Node server, matches how Growly is deployed on this box.
-			adapter: adapter()
+			// SPA static export served directly by the Go binary —
+			// matches how Growly deploys (one systemd unit, no Node).
+			adapter: adapter({
+				pages: 'build',
+				assets: 'build',
+				fallback: 'index.html'
+			})
 		})
 	],
 	test: {
