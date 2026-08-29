@@ -1,0 +1,28 @@
+name: wingback
+description: "Wingback — pesan yang dibawa carrier virtual lewat jarak GPS asli."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+# NOTE: this pubspec is hand-written as a placeholder. Run `flutter create .`
+# from this directory on a machine with the Flutter SDK installed to
+# generate the platform folders (android/, ios/) and merge this pubspec
+# with the generated one before adding platform-specific config.
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  geolocator: ^13.0.1
+  google_maps_flutter: ^2.9.0
+  firebase_messaging: ^15.1.3
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
