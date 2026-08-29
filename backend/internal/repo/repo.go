@@ -284,7 +284,7 @@ func (r *Repo) CreateMessage(ctx context.Context, m *models.Message) error {
 func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	row := r.Pool.QueryRow(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages WHERE id = $1
 	`, id)
@@ -307,7 +307,7 @@ func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, erro
 func (r *Repo) ListInbox(ctx context.Context, userID string, limit int) ([]models.Message, error) {
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE recipient_id = $1
@@ -319,7 +319,7 @@ func (r *Repo) ListInbox(ctx context.Context, userID string, limit int) ([]model
 func (r *Repo) ListSent(ctx context.Context, userID string, limit int) ([]models.Message, error) {
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
-		       sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE sender_id = $1
