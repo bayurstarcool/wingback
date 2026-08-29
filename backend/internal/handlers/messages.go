@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"math"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -105,7 +106,7 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 
 	from := delivery.Coordinates{Lat: req.SenderLat, Lng: req.SenderLng}
 	to := delivery.Coordinates{Lat: *recipient.LastLat, Lng: *recipient.LastLng}
-	var senderCity, recipientCity string
+	var senderCity, recipientCity location.City
 	if req.LocationPrivacy == models.LocationPrivacyHidden {
 		if h.cityResolver == nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "private city labels unavailable")
@@ -128,22 +129,26 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 	}
 
 	msg := &models.Message{
-		ID:              uuid.NewString(),
-		SenderID:        uid,
-		RecipientID:     req.RecipientID,
-		CarrierID:       carrier.ID,
-		Body:            req.Body,
-		SenderLat:       req.SenderLat,
-		SenderLng:       req.SenderLng,
-		RecLat:          *recipient.LastLat,
-		RecLng:          *recipient.LastLng,
-		DistanceKM:      plan.DistanceKM,
-		SpeedKMH:        plan.SpeedKMH,
-		DepartsAt:       plan.DepartsAt,
-		ArrivesAt:       plan.ArrivesAt,
-		LocationPrivacy: req.LocationPrivacy,
-		SenderCity:      senderCity,
-		RecipientCity:   recipientCity,
+		ID:               uuid.NewString(),
+		SenderID:         uid,
+		RecipientID:      req.RecipientID,
+		CarrierID:        carrier.ID,
+		Body:             req.Body,
+		SenderLat:        req.SenderLat,
+		SenderLng:        req.SenderLng,
+		RecLat:           *recipient.LastLat,
+		RecLng:           *recipient.LastLng,
+		DistanceKM:       plan.DistanceKM,
+		SpeedKMH:         plan.SpeedKMH,
+		DepartsAt:        plan.DepartsAt,
+		ArrivesAt:        plan.ArrivesAt,
+		LocationPrivacy:  req.LocationPrivacy,
+		SenderCity:       senderCity.Name,
+		RecipientCity:    recipientCity.Name,
+		SenderCityLat:    cityFloat(coarseCityCoordinate(senderCity.Lat)),
+		SenderCityLng:    cityFloat(coarseCityCoordinate(senderCity.Lng)),
+		RecipientCityLat: cityFloat(coarseCityCoordinate(recipientCity.Lat)),
+		RecipientCityLng: cityFloat(coarseCityCoordinate(recipientCity.Lng)),
 	}
 	if plan.WillBeLost {
 		msg.Status = models.StatusInTransit // will be marked lost by tracker
@@ -170,24 +175,28 @@ func (h *MessageHandler) Compose(c echo.Context) error {
 }
 
 type messageDTO struct {
-	ID              string     `json:"id"`
-	SenderID        string     `json:"sender_id"`
-	RecipientID     string     `json:"recipient_id"`
-	Body            string     `json:"body"`
-	SenderLat       *float64   `json:"sender_lat,omitempty"`
-	SenderLng       *float64   `json:"sender_lng,omitempty"`
-	RecipientLat    *float64   `json:"recipient_lat,omitempty"`
-	RecipientLng    *float64   `json:"recipient_lng,omitempty"`
-	LocationPrivacy string     `json:"location_privacy"`
-	SenderCity      string     `json:"from_label,omitempty"`
-	RecipientCity   string     `json:"to_label,omitempty"`
-	SameCity        bool       `json:"same_city"`
-	DistanceKM      float64    `json:"distance_km"`
-	SpeedKMH        float64    `json:"speed_kmh"`
-	Status          string     `json:"status"`
-	DepartsAt       time.Time  `json:"departs_at"`
-	ArrivesAt       time.Time  `json:"arrives_at"`
-	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
+	ID               string     `json:"id"`
+	SenderID         string     `json:"sender_id"`
+	RecipientID      string     `json:"recipient_id"`
+	Body             string     `json:"body"`
+	SenderLat        *float64   `json:"sender_lat,omitempty"`
+	SenderLng        *float64   `json:"sender_lng,omitempty"`
+	RecipientLat     *float64   `json:"recipient_lat,omitempty"`
+	RecipientLng     *float64   `json:"recipient_lng,omitempty"`
+	LocationPrivacy  string     `json:"location_privacy"`
+	SenderCity       string     `json:"from_label,omitempty"`
+	RecipientCity    string     `json:"to_label,omitempty"`
+	SameCity         bool       `json:"same_city"`
+	SenderCityLat    *float64   `json:"from_map_lat,omitempty"`
+	SenderCityLng    *float64   `json:"from_map_lng,omitempty"`
+	RecipientCityLat *float64   `json:"to_map_lat,omitempty"`
+	RecipientCityLng *float64   `json:"to_map_lng,omitempty"`
+	DistanceKM       float64    `json:"distance_km"`
+	SpeedKMH         float64    `json:"speed_kmh"`
+	Status           string     `json:"status"`
+	DepartsAt        time.Time  `json:"departs_at"`
+	ArrivesAt        time.Time  `json:"arrives_at"`
+	DeliveredAt      *time.Time `json:"delivered_at,omitempty"`
 }
 
 func publicRoute(m models.Message) (*float64, *float64, *float64, *float64) {
@@ -195,6 +204,19 @@ func publicRoute(m models.Message) (*float64, *float64, *float64, *float64) {
 		return nil, nil, nil, nil
 	}
 	return &m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng
+}
+
+func cityFloat(value float64) *float64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
+// coarseCityCoordinate keeps private map anchors at city-area precision. It
+// is deliberately not the sender or recipient GPS coordinate.
+func coarseCityCoordinate(value float64) float64 {
+	return math.Round(value*10) / 10
 }
 
 type streamEvent struct {
@@ -239,25 +261,36 @@ func streamPayload(m models.Message, e hub.Event) streamEvent {
 func toDTO(m models.Message) messageDTO {
 	senderLat, senderLng, recipientLat, recipientLng := publicRoute(m)
 	return messageDTO{
-		ID:              m.ID,
-		SenderID:        m.SenderID,
-		RecipientID:     m.RecipientID,
-		Body:            m.Body,
-		SenderLat:       senderLat,
-		SenderLng:       senderLng,
-		RecipientLat:    recipientLat,
-		RecipientLng:    recipientLng,
-		LocationPrivacy: m.LocationPrivacy,
-		SenderCity:      m.SenderCity,
-		RecipientCity:   m.RecipientCity,
-		SameCity:        location.SameCity(m.SenderCity, m.RecipientCity),
-		DistanceKM:      m.DistanceKM,
-		SpeedKMH:        m.SpeedKMH,
-		Status:          string(m.Status),
-		DepartsAt:       m.DepartsAt,
-		ArrivesAt:       m.ArrivesAt,
-		DeliveredAt:     m.DeliveredAt,
+		ID:               m.ID,
+		SenderID:         m.SenderID,
+		RecipientID:      m.RecipientID,
+		Body:             m.Body,
+		SenderLat:        senderLat,
+		SenderLng:        senderLng,
+		RecipientLat:     recipientLat,
+		RecipientLng:     recipientLng,
+		LocationPrivacy:  m.LocationPrivacy,
+		SenderCity:       m.SenderCity,
+		RecipientCity:    m.RecipientCity,
+		SameCity:         location.SameCity(m.SenderCity, m.RecipientCity),
+		SenderCityLat:    privateCityCoordinate(m, m.SenderCityLat),
+		SenderCityLng:    privateCityCoordinate(m, m.SenderCityLng),
+		RecipientCityLat: privateCityCoordinate(m, m.RecipientCityLat),
+		RecipientCityLng: privateCityCoordinate(m, m.RecipientCityLng),
+		DistanceKM:       m.DistanceKM,
+		SpeedKMH:         m.SpeedKMH,
+		Status:           string(m.Status),
+		DepartsAt:        m.DepartsAt,
+		ArrivesAt:        m.ArrivesAt,
+		DeliveredAt:      m.DeliveredAt,
 	}
+}
+
+func privateCityCoordinate(m models.Message, value *float64) *float64 {
+	if m.LocationPrivacy != models.LocationPrivacyHidden {
+		return nil
+	}
+	return value
 }
 
 func (h *MessageHandler) ListInbox(c echo.Context) error {

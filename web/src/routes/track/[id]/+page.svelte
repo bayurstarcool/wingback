@@ -63,6 +63,83 @@
 						maxZoom: 6
 					})
 					.addTo(map);
+				if (msg.from_map_lat != null && msg.from_map_lng != null) {
+					const origin: [number, number] = [msg.from_map_lat, msg.from_map_lng];
+					const sameCity = msg.same_city === true;
+					const destination: [number, number] =
+						!sameCity && msg.to_map_lat != null && msg.to_map_lng != null
+							? [msg.to_map_lat, msg.to_map_lng]
+							: origin;
+					leaflet
+						.circle(origin, {
+							radius: sameCity ? 28000 : 30000,
+							color: '#8c5f4b',
+							weight: 3,
+							fillColor: '#e7bda9',
+							fillOpacity: 0.42
+						})
+						.addTo(map);
+					leaflet
+						.circleMarker(origin, {
+							radius: 5,
+							color: '#fffaf5',
+							weight: 2,
+							fillColor: '#806957',
+							fillOpacity: 0.95
+						})
+						.addTo(map)
+						.bindTooltip(privateOriginLabel(), {
+							permanent: true,
+							direction: 'top',
+							className: 'city-label'
+						});
+					if (!sameCity) {
+						leaflet
+							.circle(destination, {
+								radius: 30000,
+								color: '#b54f32',
+								weight: 3,
+								fillColor: '#e9aa95',
+								fillOpacity: 0.42
+							})
+							.addTo(map);
+						leaflet
+							.circleMarker(destination, {
+								radius: 5,
+								color: '#fffaf5',
+								weight: 2,
+								fillColor: '#c36040',
+								fillOpacity: 0.95
+							})
+							.addTo(map)
+							.bindTooltip(privateDestinationLabel(), {
+								permanent: true,
+								direction: 'top',
+								className: 'city-label'
+							});
+						leaflet
+							.polyline([origin, destination], {
+								color: '#fffaf5',
+								weight: 16,
+								opacity: 0.92,
+								lineCap: 'round'
+							})
+							.addTo(map);
+						leaflet
+							.polyline([origin, destination], {
+								color: '#c36040',
+								weight: 7,
+								dashArray: '15 11',
+								lineCap: 'round',
+								opacity: 1
+							})
+							.addTo(map);
+					}
+					map.fitBounds(sameCity ? [origin, origin] : [origin, destination], {
+						padding: [72, 72],
+						maxZoom: sameCity ? 9 : 7
+					});
+				}
 			}
 			privateProgress = flightProgress(msg);
 			privatePhase = phaseFor(privateProgress);
@@ -295,17 +372,17 @@
 						<div bind:this={privateMapEl} class="private-map-tiles"></div>
 						<div class="private-map-wash"></div>
 						<div class="private-grid"></div>
-						<div class="private-route">
-							<span class="private-node origin"
-								><i>◌</i><strong>{privateOriginLabel()}</strong></span
-							><span class="private-line"><i style={`left: ${privateProgress * 100}%`}>✦</i></span
-							><span class="private-node destination"
-								><i>◌</i><strong>{privateDestinationLabel()}</strong></span
-							>
-						</div>
-						<div class="private-center">
-							<span>✦</span><strong>{privatePhase}</strong><small>{privateRouteLabel()}</small
-							><small>Lokasi carrier disembunyikan</small>
+						<div class="private-signal" aria-hidden="true"></div>
+						<div
+							class="private-center"
+							class:arrived={status === 'arrived'}
+							class:lost={status === 'lost'}
+						>
+							<span>✦</span><strong>{privatePhase}</strong><small>{privateRouteLabel()}</small>
+							<small>Lokasi carrier disembunyikan</small>
+							<div class="private-progress" aria-label="Progress perjalanan">
+								<span style:width={`${Math.round(privateProgress * 100)}%`}></span>
+							</div>
 						</div>
 					</div>
 				{:else}
@@ -552,13 +629,16 @@
 		inset: 0;
 	}
 	.private-map-tiles {
-		opacity: 0.68;
-		filter: saturate(0.68) sepia(0.12) contrast(0.98);
+		opacity: 0.74;
+		filter: saturate(0.76) sepia(0.1) contrast(1.02);
 	}
 	.private-map-wash {
 		z-index: 0;
-		background: rgba(248, 239, 229, 0.42);
+		background:
+			radial-gradient(circle at 50% 44%, rgba(255, 245, 235, 0.5), transparent 38%),
+			rgba(248, 239, 229, 0.42);
 		pointer-events: none;
+		animation: private-wash 12s ease-in-out infinite alternate;
 	}
 	.private-map > :not(.private-map-tiles) {
 		z-index: 1;
@@ -566,9 +646,18 @@
 	.private-map > .private-grid {
 		z-index: 2;
 	}
-	.private-map > .private-route,
 	.private-map > .private-center {
 		z-index: 3;
+	}
+	.private-map :global(.city-label) {
+		border: 1px solid rgba(104, 82, 65, 0.42);
+		border-radius: 99px;
+		background: rgba(255, 250, 244, 0.94);
+		box-shadow: 0 4px 12px rgba(57, 40, 25, 0.14);
+		padding: 6px 10px;
+		color: #493d34;
+		font-size: 11px;
+		font-weight: 800;
 	}
 	.private-grid {
 		position: absolute;
@@ -579,72 +668,21 @@
 			linear-gradient(90deg, rgba(133, 113, 95, 0.12) 1px, transparent 1px);
 		background-size: 44px 44px;
 		transform: rotate(-8deg) scale(1.2);
-	}
-	.private-route {
-		position: relative;
-		z-index: 1;
-		display: flex;
-		align-items: center;
-		width: min(78%, 640px);
-		gap: 16px;
-	}
-	.private-node {
-		display: grid;
-		justify-items: center;
-		gap: 8px;
-		min-width: 78px;
-		color: #65584e;
-	}
-	.private-node i {
-		display: grid;
-		width: 46px;
-		height: 46px;
-		place-items: center;
-		border: 1px solid currentColor;
-		border-radius: 50%;
-		background: rgba(255, 250, 244, 0.72);
-		font-size: 24px;
-		font-style: normal;
-		box-shadow: 0 0 0 10px rgba(255, 250, 244, 0.22);
-	}
-	.private-node.destination {
-		color: #c36040;
-	}
-	.private-node strong {
-		font-size: 11px;
-		white-space: nowrap;
-	}
-	.private-line {
-		position: relative;
-		flex: 1;
-		height: 2px;
-		background: repeating-linear-gradient(90deg, #c98467 0 8px, transparent 8px 15px);
-	}
-	.private-line i {
-		position: absolute;
-		top: 50%;
-		display: grid;
-		width: 30px;
-		height: 30px;
-		place-items: center;
-		border: 2px solid #fffaf5;
-		border-radius: 50%;
-		background: #d96d49;
-		color: #fffaf5;
-		font-size: 14px;
-		font-style: normal;
-		box-shadow: 0 5px 14px rgba(168, 78, 47, 0.24);
-		transform: translate(-50%, -50%);
-		transition: left 0.8s ease;
+		animation: private-grid-drift 20s linear infinite;
 	}
 	.private-center {
 		position: absolute;
 		z-index: 1;
-		top: 57%;
+		top: 82%;
 		display: grid;
 		justify-items: center;
 		gap: 5px;
-		transform: translateY(100%);
+		transform: translate(-50%, -50%);
+		border: 1px solid rgba(255, 250, 244, 0.9);
+		border-radius: 14px;
+		background: rgba(255, 250, 244, 0.84);
+		padding: 12px 16px;
+		box-shadow: 0 8px 24px rgba(57, 40, 25, 0.13);
 	}
 	.private-center > span {
 		color: #d96d49;
@@ -661,8 +699,8 @@
 	.map-legend {
 		position: absolute;
 		right: 14px;
-		bottom: 14px;
-		left: 14px;
+		top: 14px;
+		left: auto;
 		display: flex;
 		align-items: center;
 		gap: 8px;
@@ -674,6 +712,13 @@
 		font-size: 10px;
 		font-weight: 700;
 		box-shadow: 0 5px 20px rgba(57, 40, 25, 0.1);
+	}
+	.private-legend {
+		bottom: auto;
+		max-width: min(300px, calc(100% - 28px));
+		border-color: rgba(255, 255, 255, 0.88);
+		background: rgba(255, 250, 244, 0.94);
+		color: #5f5147;
 	}
 	.legend-dot {
 		width: 8px;
@@ -694,6 +739,106 @@
 		height: 1px;
 		margin-left: 6px;
 		background: repeating-linear-gradient(90deg, #d96d49 0 5px, transparent 5px 9px);
+	}
+	.private-signal {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 116px;
+		height: 116px;
+		border: 1px solid rgba(217, 109, 73, 0.22);
+		border-radius: 50%;
+		transform: translate(-50%, -50%);
+		animation: signal-expand 3.2s ease-out infinite;
+		pointer-events: none;
+	}
+	:global(.private-center.arrived .private-signal),
+	:global(.private-center.lost .private-signal) {
+		animation-play-state: paused;
+		opacity: 0.35;
+	}
+	.private-center > span {
+		animation: star-float 2.4s ease-in-out infinite;
+	}
+	.private-center.arrived > span,
+	.private-center.lost > span {
+		animation: none;
+	}
+	.private-progress {
+		width: min(180px, 70vw);
+		height: 4px;
+		margin-top: 5px;
+		overflow: hidden;
+		border-radius: 99px;
+		background: rgba(195, 95, 62, 0.14);
+	}
+	.private-progress span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: linear-gradient(90deg, #9c705c, #d96d49);
+		transition: width 0.8s ease;
+	}
+	.private-center.arrived .private-progress span {
+		background: #4c7a5c;
+	}
+	.private-center.lost .private-progress span {
+		background: #b25b4c;
+	}
+	@keyframes private-wash {
+		from {
+			opacity: 0.72;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+	@keyframes private-grid-drift {
+		from {
+			background-position: 0 0;
+		}
+		to {
+			background-position: 44px 44px;
+		}
+	}
+	@keyframes route-dash {
+		to {
+			stroke-dashoffset: -52px;
+		}
+	}
+	@keyframes route-breathe {
+		0%,
+		100% {
+			opacity: 0.72;
+		}
+		50% {
+			opacity: 1;
+		}
+	}
+	@keyframes signal-expand {
+		0% {
+			opacity: 0.7;
+			transform: translate(-50%, -50%) scale(0.72);
+		}
+		70%,
+		100% {
+			opacity: 0;
+			transform: translate(-50%, -50%) scale(1.35);
+		}
+	}
+	@keyframes star-float {
+		0%,
+		100% {
+			transform: translateY(0) rotate(0);
+		}
+		50% {
+			transform: translateY(-4px) rotate(8deg);
+		}
+	}
+	.private-map :global(.leaflet-overlay-pane path[stroke='#c36040']) {
+		animation:
+			route-dash 1.8s linear infinite,
+			route-breathe 2.8s ease-in-out infinite;
 	}
 	.track-side {
 		display: grid;

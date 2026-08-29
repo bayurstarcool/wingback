@@ -267,12 +267,14 @@ func (r *Repo) CreateMessage(ctx context.Context, m *models.Message) error {
 		INSERT INTO messages (
 			sender_id, recipient_id, carrier_id, body,
 			sender_lat, sender_lng, recipient_lat, recipient_lng, sender_city, recipient_city,
+			sender_city_lat, sender_city_lng, recipient_city_lat, recipient_city_lng,
 			distance_km, speed_kmh, status, departs_at, arrives_at, location_privacy
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING id, created_at
 	`,
 		m.SenderID, m.RecipientID, m.CarrierID, m.Body,
 		m.SenderLat, m.SenderLng, m.RecLat, m.RecLng, m.SenderCity, m.RecipientCity,
+		m.SenderCityLat, m.SenderCityLng, m.RecipientCityLat, m.RecipientCityLng,
 		m.DistanceKM, m.SpeedKMH, m.Status, m.DepartsAt, m.ArrivesAt, m.LocationPrivacy,
 	)
 	if err := row.Scan(&m.ID, &m.CreatedAt); err != nil {
@@ -285,6 +287,7 @@ func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, erro
 	row := r.Pool.QueryRow(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
 		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
+		       sender_city_lat, sender_city_lng, recipient_city_lat, recipient_city_lng,
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages WHERE id = $1
 	`, id)
@@ -293,6 +296,7 @@ func (r *Repo) GetMessage(ctx context.Context, id string) (*models.Message, erro
 	var deliveredAt *time.Time
 	if err := row.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.CarrierID, &m.Body,
 		&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng, &m.SenderCity, &m.RecipientCity,
+		&m.SenderCityLat, &m.SenderCityLng, &m.RecipientCityLat, &m.RecipientCityLng,
 		&m.DistanceKM, &m.SpeedKMH, &m.Status, &m.DepartsAt, &m.ArrivesAt,
 		&deliveredAt, &m.SpeedupsUsed, &m.LocationPrivacy, &m.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -308,6 +312,7 @@ func (r *Repo) ListInbox(ctx context.Context, userID string, limit int) ([]model
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
 		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
+		       sender_city_lat, sender_city_lng, recipient_city_lat, recipient_city_lng,
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE recipient_id = $1
@@ -320,6 +325,7 @@ func (r *Repo) ListSent(ctx context.Context, userID string, limit int) ([]models
 	return r.listMessages(ctx, `
 		SELECT id, sender_id, recipient_id, carrier_id, body,
 		       sender_lat, sender_lng, recipient_lat, recipient_lng, COALESCE(sender_city, ''), COALESCE(recipient_city, ''),
+		       sender_city_lat, sender_city_lng, recipient_city_lat, recipient_city_lng,
 		       distance_km, speed_kmh, status, departs_at, arrives_at, delivered_at, speedups_used, location_privacy, created_at
 		FROM messages
 		WHERE sender_id = $1
@@ -341,6 +347,7 @@ func (r *Repo) listMessages(ctx context.Context, sql string, args ...any) ([]mod
 		var deliveredAt *time.Time
 		if err := rows.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.CarrierID, &m.Body,
 			&m.SenderLat, &m.SenderLng, &m.RecLat, &m.RecLng, &m.SenderCity, &m.RecipientCity,
+			&m.SenderCityLat, &m.SenderCityLng, &m.RecipientCityLat, &m.RecipientCityLng,
 			&m.DistanceKM, &m.SpeedKMH, &m.Status, &m.DepartsAt, &m.ArrivesAt,
 			&deliveredAt, &m.SpeedupsUsed, &m.LocationPrivacy, &m.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)

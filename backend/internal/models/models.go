@@ -41,26 +41,30 @@ const (
 )
 
 type Message struct {
-	ID              string
-	SenderID        string
-	RecipientID     string
-	CarrierID       string
-	Body            string
-	SenderLat       float64
-	SenderLng       float64
-	RecLat          float64
-	RecLng          float64
-	DistanceKM      float64
-	SpeedKMH        float64
-	Status          MessageStatus
-	DepartsAt       time.Time
-	ArrivesAt       time.Time
-	DeliveredAt     *time.Time
-	SpeedupsUsed    int
-	LocationPrivacy string
-	SenderCity      string
-	RecipientCity   string
-	CreatedAt       time.Time
+	ID               string
+	SenderID         string
+	RecipientID      string
+	CarrierID        string
+	Body             string
+	SenderLat        float64
+	SenderLng        float64
+	RecLat           float64
+	RecLng           float64
+	DistanceKM       float64
+	SpeedKMH         float64
+	Status           MessageStatus
+	DepartsAt        time.Time
+	ArrivesAt        time.Time
+	DeliveredAt      *time.Time
+	SpeedupsUsed     int
+	LocationPrivacy  string
+	SenderCity       string
+	RecipientCity    string
+	SenderCityLat    *float64
+	SenderCityLng    *float64
+	RecipientCityLat *float64
+	RecipientCityLng *float64
+	CreatedAt        time.Time
 }
 
 const (

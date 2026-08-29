@@ -70,6 +70,10 @@ export interface Message {
 	from_label?: string;
 	to_label?: string;
 	same_city?: boolean;
+	from_map_lat?: number | null;
+	from_map_lng?: number | null;
+	to_map_lat?: number | null;
+	to_map_lng?: number | null;
 	status: MessageStatus;
 	departs_at: string;
 	arrives_at: string;

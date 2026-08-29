@@ -11,6 +11,10 @@ WHERE last_lat IS NOT NULL AND last_lng IS NOT NULL;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS location_privacy TEXT NOT NULL DEFAULT 'accurate';
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_city TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient_city TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_city_lat DOUBLE PRECISION;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_city_lng DOUBLE PRECISION;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient_city_lat DOUBLE PRECISION;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient_city_lng DOUBLE PRECISION;
 ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_location_privacy_check;
 ALTER TABLE messages ADD CONSTRAINT messages_location_privacy_check
     CHECK (location_privacy IN ('accurate', 'hidden'));
