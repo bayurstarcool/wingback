@@ -48,13 +48,14 @@
 			if (privateMapEl) {
 				map = leaflet
 					.map(privateMapEl, {
-						zoomControl: false,
+						zoomControl: true,
 						attributionControl: true,
 						dragging: false,
-						scrollWheelZoom: false,
-						doubleClickZoom: false,
-						boxZoom: false,
-						keyboard: false
+						scrollWheelZoom: true,
+						doubleClickZoom: true,
+						boxZoom: true,
+						touchZoom: true,
+						keyboard: true
 					})
 					.setView([-2.5, 118], 4);
 				leaflet
@@ -137,7 +138,7 @@
 					}
 					map.fitBounds(sameCity ? [origin, origin] : [origin, destination], {
 						padding: [72, 72],
-						maxZoom: sameCity ? 9 : 7
+						maxZoom: sameCity ? 10 : 8
 					});
 				}
 			}
@@ -600,12 +601,13 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
 		gap: 18px;
-		align-items: stretch;
+		align-items: start;
 	}
 	.map-panel {
 		position: relative;
 		overflow: hidden;
-		min-height: 565px;
+		min-height: 430px;
+		height: 430px;
 		border: 1px solid #e2d8ce;
 		border-radius: 20px;
 		background: #e9e3dc;
@@ -613,12 +615,13 @@
 	}
 	.track-map {
 		width: 100%;
-		height: 565px;
+		height: 430px;
 	}
 	.private-map {
 		position: relative;
 		display: grid;
-		min-height: 565px;
+		min-height: 430px;
+		height: 430px;
 		overflow: hidden;
 		place-items: center;
 		background: #e4d9cd;
@@ -1054,6 +1057,22 @@
 	.track-map :global(.leaflet-control-zoom a) {
 		color: #554a40;
 	}
+	.private-map :global(.leaflet-control-zoom) {
+		margin-top: 58px;
+		margin-left: 14px;
+		border: 1px solid rgba(104, 82, 65, 0.2);
+		border-radius: 10px;
+		overflow: hidden;
+		box-shadow: 0 5px 16px rgba(57, 40, 25, 0.14);
+	}
+	.private-map :global(.leaflet-control-zoom a) {
+		width: 30px;
+		height: 30px;
+		line-height: 28px;
+		border-color: rgba(104, 82, 65, 0.16);
+		background: rgba(255, 250, 244, 0.94);
+		color: #554a40;
+	}
 	@media (max-width: 820px) {
 		.track-topline {
 			margin-bottom: 22px;
@@ -1088,9 +1107,10 @@
 			grid-template-columns: 1fr;
 		}
 		.map-panel,
-		.track-map {
-			min-height: 390px;
-			height: 390px;
+		.track-map,
+		.private-map {
+			min-height: 320px;
+			height: 320px;
 		}
 		.map-legend {
 			overflow-x: auto;
