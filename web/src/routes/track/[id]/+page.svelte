@@ -55,7 +55,11 @@
 						doubleClickZoom: true,
 						boxZoom: true,
 						touchZoom: true,
-						keyboard: true
+						keyboard: true,
+						zoomSnap: 0.5,
+						zoomDelta: 1,
+						minZoom: 4,
+						maxZoom: 12
 					})
 					.setView([-2.5, 118], 4);
 				leaflet
@@ -136,10 +140,20 @@
 							})
 							.addTo(map);
 					}
-					map.fitBounds(sameCity ? [origin, origin] : [origin, destination], {
-						padding: [72, 72],
-						maxZoom: sameCity ? 10 : 8
-					});
+					const fitRoute = () => {
+						map?.invalidateSize({ pan: false });
+						if (sameCity) {
+							map?.setView(origin, 11, { animate: false });
+							return;
+						}
+						map?.fitBounds([origin, destination], {
+							padding: [34, 34],
+							maxZoom: 10,
+							animate: false
+						});
+					};
+					fitRoute();
+					requestAnimationFrame(fitRoute);
 				}
 			}
 			privateProgress = flightProgress(msg);
@@ -648,9 +662,11 @@
 	}
 	.private-map > .private-grid {
 		z-index: 2;
+		pointer-events: none;
 	}
 	.private-map > .private-center {
 		z-index: 3;
+		pointer-events: none;
 	}
 	.private-map :global(.city-label) {
 		border: 1px solid rgba(104, 82, 65, 0.42);
