@@ -128,8 +128,9 @@
 								direction: 'top',
 								className: 'city-label'
 							});
+						const planRoutePoints = buildPlanRoute(origin, destination, sameCity);
 						leaflet
-							.polyline(buildPlanRoute(origin, destination, sameCity), {
+							.polyline(planRoutePoints, {
 								color: '#6f5c47',
 								weight: 2.5,
 								dashArray: '3 8',
@@ -137,6 +138,33 @@
 								opacity: 0.9
 							})
 							.addTo(map);
+						// Direction chevrons along the plan route: a lightweight indicator
+						// of travel direction, separate from the dashed guide line itself.
+						if (!sameCity) {
+							const chevronCount = 3;
+							for (let step = 1; step <= chevronCount; step += 1) {
+								const t = step / (chevronCount + 1);
+								const at = Math.min(
+									planRoutePoints.length - 2,
+									Math.max(0, Math.round(t * (planRoutePoints.length - 1)))
+								);
+								const from = planRoutePoints[at];
+								const to = planRoutePoints[at + 1];
+								const heading = Math.atan2(to[1] - from[1], to[0] - from[0]) * (180 / Math.PI);
+								leaflet
+									.marker(from, {
+										icon: leaflet.divIcon({
+											className: 'plan-route-chevron',
+											html: `<span style="transform: rotate(${heading - 90}deg)">›</span>`,
+											iconSize: [16, 16],
+											iconAnchor: [8, 8]
+										}),
+										interactive: false,
+										keyboard: false
+									})
+									.addTo(map);
+							}
+						}
 						privateTrailUnderlay = leaflet
 							.polyline([], {
 								color: '#fffaf5',
@@ -319,10 +347,21 @@
 	) {
 		if (sameCity)
 			return [origin, [origin[0] + 0.12, origin[1] + 0.16], origin] as Array<[number, number]>;
-		const bend = Math.max(0.18, Math.min(0.5, Math.abs(destination[1] - origin[1]) * 0.22));
+		// Bend perpendicular to the actual origin->destination direction, not
+		// a fixed axis — a route running mostly north-south (like most
+		// same-region trips) needs the bend applied sideways (longitude), and
+		// one running mostly east-west needs it applied vertically (latitude).
+		// Using a hardcoded axis made routes that travel mainly along that
+		// axis look almost perfectly straight.
+		const deltaLat = destination[0] - origin[0];
+		const deltaLng = destination[1] - origin[1];
+		const length = Math.max(0.0001, Math.hypot(deltaLat, deltaLng));
+		const normalLat = -deltaLng / length;
+		const normalLng = deltaLat / length;
+		const bend = Math.max(0.16, Math.min(0.6, length * 0.38));
 		const mid: [number, number] = [
-			(origin[0] + destination[0]) / 2 + bend,
-			(origin[1] + destination[1]) / 2
+			(origin[0] + destination[0]) / 2 + normalLat * bend,
+			(origin[1] + destination[1]) / 2 + normalLng * bend
 		];
 		const points: Array<[number, number]> = [];
 		for (let index = 0; index <= 24; index += 1) {
@@ -337,24 +376,42 @@
 	}
 
 	// The bird is free to wander however it likes relative to the plan route —
-	// looping, circling back, drifting wide — as long as it starts at the
-	// origin and lands exactly on the destination. This is deliberately much
-	// less constrained than buildPlanRoute: only city anchors are used, never
-	// real GPS, so the wandering carries no precise-location risk.
+	// but it should read like an actual bird in flight, not a mathematical
+	// wiggle. Real birds circle (thermalling / orienting), then glide in
+	// broad swooping arcs, then commit to a straight final approach. This
+	// builds exactly that three-act shape: circle near the origin, a couple
+	// of wide S-curve glides toward the destination, then a clean approach.
+	// Only city anchors are used, never real GPS, so wandering carries no
+	// precise-location risk.
 	function buildWanderRoute(
 		origin: [number, number],
 		destination: [number, number],
 		sameCity: boolean
 	) {
-		if (sameCity)
-			return [
-				origin,
-				[origin[0] + 0.09, origin[1] + 0.14],
-				[origin[0] + 0.14, origin[1] - 0.05],
-				[origin[0] - 0.05, origin[1] + 0.22],
-				[origin[0] - 0.1, origin[1] + 0.07],
-				origin
-			] as Array<[number, number]>;
+		const seed = Math.abs(Math.sin(origin[0] * 17.3 + origin[1] * 9.1 + destination[0] * 3.7));
+		const points: Array<[number, number]> = [];
+
+		if (sameCity) {
+			// Same-city journeys have no real destination offset, so the whole
+			// trip is a circling wander that returns to the origin: a bird
+			// looping over one neighborhood rather than travelling anywhere.
+			const radius = 0.09 + seed * 0.05;
+			const turns = 2.1 + seed * 0.8;
+			const centerLat = origin[0] + radius * 0.35;
+			const centerLng = origin[1] + radius * 0.35;
+			for (let index = 0; index <= 40; index += 1) {
+				const t = index / 40;
+				const angle = t * Math.PI * 2 * turns + seed * 5;
+				const shrink = 1 - t * 0.55;
+				const wobble = Math.sin(angle * 2.3) * radius * 0.18;
+				points.push([
+					centerLat + Math.cos(angle) * (radius * shrink + wobble),
+					centerLng + Math.sin(angle) * (radius * shrink + wobble)
+				]);
+			}
+			points.push(origin);
+			return points;
+		}
 
 		// Coarse journey only: wander around city anchors, never around user GPS.
 		const deltaLat = destination[0] - origin[0];
@@ -362,29 +419,54 @@
 		const length = Math.max(0.001, Math.hypot(deltaLat, deltaLng));
 		const normalLat = -deltaLng / length;
 		const normalLng = deltaLat / length;
-		const seed = Math.abs(Math.sin(origin[0] * 17.3 + destination[1] * 9.1));
 		const amplitude = Math.min(0.42, Math.max(0.14, length * 0.32));
-		const points: Array<[number, number]> = [];
 
-		for (let index = 0; index <= 48; index += 1) {
-			const t = index / 48;
-			const eased = t * t * (3 - 2 * t);
-			const envelope = Math.sin(Math.PI * t);
-			// Early loop: strong, high-frequency circling that fades out as the
-			// bird commits to the final approach, so it can "putar-putar" near
-			// departure without ever missing the destination.
-			const earlyLoop =
-				Math.sin(t * Math.PI * 7.4 + seed * 3.1) * amplitude * 1.5 * Math.pow(1 - t, 1.6);
-			const lateral =
-				Math.sin(t * Math.PI * (2.2 + seed * 1.1) + seed * Math.PI) * amplitude * envelope +
-				Math.sin(t * Math.PI * 5.2 + seed) * amplitude * 0.35 * envelope +
-				earlyLoop;
-			const forward =
-				Math.sin(t * Math.PI * 2.6 + seed * 2) * amplitude * 0.22 * envelope +
-				Math.sin(t * Math.PI * 6.6 + seed * 1.7) * amplitude * 0.3 * Math.pow(1 - t, 1.4);
+		// Act 1: circle near the origin, like a bird orienting before committing
+		// to the journey. Radius shrinks slightly as it spirals out of the loop
+		// and onto the glide line.
+		const loopRadius = amplitude * 0.55;
+		const loopTurns = 1.3 + seed * 0.7;
+		const loopCenterLat = origin[0] + normalLat * loopRadius * 0.7 + deltaLat * 0.04;
+		const loopCenterLng = origin[1] + normalLng * loopRadius * 0.7 + deltaLng * 0.04;
+		const loopSteps = 16;
+		for (let index = 0; index <= loopSteps; index += 1) {
+			const t = index / loopSteps;
+			const angle = t * Math.PI * 2 * loopTurns + seed * 6;
+			const shrink = 1 - t * 0.3;
 			points.push([
-				origin[0] + deltaLat * eased + normalLat * lateral + deltaLat * forward,
-				origin[1] + deltaLng * eased + normalLng * lateral + deltaLng * forward
+				loopCenterLat + Math.cos(angle) * loopRadius * shrink,
+				loopCenterLng + Math.sin(angle) * loopRadius * shrink
+			]);
+		}
+
+		// Act 2: two or three broad gliding S-curves toward the destination —
+		// wide, slow sweeps rather than tight oscillation, the way a bird
+		// glides between thermals instead of flapping in a straight line.
+		const glideStart = points[points.length - 1];
+		const glideEndT = 0.86;
+		const glideEnd: [number, number] = [
+			origin[0] + deltaLat * glideEndT,
+			origin[1] + deltaLng * glideEndT
+		];
+		const glideSteps = 28;
+		for (let index = 1; index <= glideSteps; index += 1) {
+			const t = index / glideSteps;
+			const eased = t * t * (3 - 2 * t);
+			const baseLat = glideStart[0] + (glideEnd[0] - glideStart[0]) * eased;
+			const baseLng = glideStart[1] + (glideEnd[1] - glideStart[1]) * eased;
+			const sweep = Math.sin(t * Math.PI * 1.7 + seed * 2.4) * amplitude * (1 - t * 0.5);
+			points.push([baseLat + normalLat * sweep, baseLng + normalLng * sweep]);
+		}
+
+		// Act 3: a clean, direct final approach onto the destination — no more
+		// swooping once the bird commits to landing.
+		const approachSteps = 10;
+		for (let index = 1; index <= approachSteps; index += 1) {
+			const t = index / approachSteps;
+			const eased = t * t * (3 - 2 * t);
+			points.push([
+				glideEnd[0] + (destination[0] - glideEnd[0]) * eased,
+				glideEnd[1] + (destination[1] - glideEnd[1]) * eased
 			]);
 		}
 		// Guarantee exact arrival: floating point drift from the trig terms
@@ -920,6 +1002,26 @@
 	}
 	.legend-line-plan {
 		background: repeating-linear-gradient(90deg, #6f5c47 0 3px, transparent 3px 6px);
+	}
+	:global(.plan-route-chevron) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+	:global(.plan-route-chevron span) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 17px;
+		height: 17px;
+		border-radius: 99px;
+		background: #4a3b2c;
+		box-shadow: 0 0 0 2px rgba(255, 250, 244, 0.95);
+		font-size: 13px;
+		line-height: 1;
+		font-weight: 800;
+		color: #fffaf5;
 	}
 	.legend-line-trail {
 		background: #2f7a5f;
