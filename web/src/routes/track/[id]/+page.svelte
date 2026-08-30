@@ -22,6 +22,7 @@
 	let privateProgress = $state(0);
 	let privatePhase = $state('Berangkat');
 	let privateBird = $state({ x: 50, y: 50, rotation: 0 });
+	let privateBirdFacing = 0;
 	let privateRoutePoints = $state<Array<[number, number]>>([]);
 	let privateTrailPoints: Array<[number, number]> = [];
 	let privateAnimationFrame: number | null = null;
@@ -183,6 +184,17 @@
 							.addTo(map);
 					}
 					privateRoutePoints = buildWanderRoute(origin, destination, sameCity);
+					// Fixed, valid heading for the whole journey: point the bird toward
+					// the destination in screen space. Computed ONCE so the bird never
+					// spins through all 360 degrees while it loops/circles the wander
+					// path — it always faces the destination (a sensible, readable
+					// direction), regardless of how the route wiggles.
+					const facingOrigin = map?.latLngToContainerPoint(origin);
+					const facingDest = map?.latLngToContainerPoint(destination);
+					if (facingOrigin && facingDest)
+						privateBirdFacing =
+							Math.atan2(facingDest.y - facingOrigin.y, facingDest.x - facingOrigin.x) *
+							(180 / Math.PI);
 					updatePrivateBird(privateProgress);
 					const fitRoute = () => {
 						map?.invalidateSize({ pan: false });
@@ -491,7 +503,7 @@
 		privateBird = {
 			x: point ? (point.x / width) * 100 : 50,
 			y: point ? (point.y / height) * 100 : 50,
-			rotation: Math.atan2(next[1] - current[1], next[0] - current[0]) * (180 / Math.PI) - 90
+			rotation: privateBirdFacing
 		};
 		growPrivateTrail([lat, lng]);
 	}
@@ -618,8 +630,6 @@
 					<div class="private-map" aria-label="Peta area privat">
 						<div bind:this={privateMapEl} class="private-map-tiles"></div>
 						<div class="private-map-wash"></div>
-						<div class="private-grid"></div>
-						<div class="private-signal" aria-hidden="true"></div>
 						<div
 							class="private-bird"
 							class:arrived={status === 'arrived'}
@@ -642,32 +652,39 @@
 								<circle class="bird-eye" cx="52.4" cy="20.2" r="1.5" />
 							</svg>
 						</div>
+					</div>
+				{:else}
+					<div bind:this={mapEl} class="track-map"></div>
+				{/if}
+				<div class="map-footer">
+					{#if msg.location_privacy === 'hidden'}
 						<div
 							class="private-center"
 							class:arrived={status === 'arrived'}
 							class:lost={status === 'lost'}
 						>
-							<span>✦</span><strong>{privatePhase}</strong><small>{privateRouteLabel()}</small>
-							<small>Lokasi carrier disembunyikan</small>
+							<div class="private-center-line">
+								<strong>{privatePhase}</strong>
+								<small>{privateRouteLabel()}</small>
+							</div>
 							<div class="private-progress" aria-label="Progress perjalanan">
 								<span style:width={`${Math.round(privateProgress * 100)}%`}></span>
 							</div>
+							<small class="private-center-note">Lokasi carrier disembunyikan</small>
 						</div>
-					</div>
-				{:else}
-					<div bind:this={mapEl} class="track-map"></div>
-				{/if}
-				{#if msg.location_privacy === 'hidden'}
-					<div class="map-legend private-legend">
-						<span class="legend-line legend-line-plan"></span> Rencana rute
-						<span class="legend-line legend-line-trail"></span> Jejak burung · GPS tidak dibagikan
-					</div>
-				{:else}
-					<div class="map-legend">
-						<span class="legend-dot start"></span> Berangkat <span class="legend-line"></span> Rute
-						pesan <span class="legend-dot end"></span> Tujuan
-					</div>
-				{/if}
+					{/if}
+					{#if msg.location_privacy === 'hidden'}
+						<div class="map-legend private-legend">
+							<span class="legend-line legend-line-plan"></span> Rencana rute
+							<span class="legend-line legend-line-trail"></span> Jejak burung · GPS tidak dibagikan
+						</div>
+					{:else}
+						<div class="map-legend">
+							<span class="legend-dot start"></span> Berangkat <span class="legend-line"></span>
+							Rute pesan <span class="legend-dot end"></span> Tujuan
+						</div>
+					{/if}
+				</div>
 			</div>
 			<aside class="track-side">
 				<div class="eta-card" class:done={status === 'arrived'} class:failed={status === 'lost'}>
@@ -874,9 +891,10 @@
 	}
 	.map-panel {
 		position: relative;
+		display: flex;
+		flex-direction: column;
 		overflow: hidden;
-		min-height: 430px;
-		height: 430px;
+		height: auto;
 		border: 1px solid #e2d8ce;
 		border-radius: 20px;
 		background: #e9e3dc;
@@ -889,11 +907,20 @@
 	.private-map {
 		position: relative;
 		display: grid;
-		min-height: 430px;
+		width: 100%;
 		height: 430px;
 		overflow: hidden;
 		place-items: center;
 		background: #e4d9cd;
+	}
+	.map-footer {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px;
+		padding: 10px 12px;
+		border-top: 1px solid #e2d8ce;
+		background: #efe9e1;
 	}
 	.private-map-tiles,
 	.private-map-wash {
@@ -915,14 +942,6 @@
 	.private-map > :not(.private-map-tiles) {
 		z-index: 1;
 	}
-	.private-map > .private-grid {
-		z-index: 2;
-		pointer-events: none;
-	}
-	.private-map > .private-center {
-		z-index: 3;
-		pointer-events: none;
-	}
 	.private-map > .private-bird {
 		z-index: 5;
 		pointer-events: none;
@@ -937,65 +956,59 @@
 		font-size: 11px;
 		font-weight: 800;
 	}
-	.private-grid {
-		position: absolute;
-		inset: 0;
-		opacity: 0.34;
-		background-image:
-			linear-gradient(rgba(133, 113, 95, 0.12) 1px, transparent 1px),
-			linear-gradient(90deg, rgba(133, 113, 95, 0.12) 1px, transparent 1px);
-		background-size: 44px 44px;
-		transform: rotate(-8deg) scale(1.2);
-		animation: private-grid-drift 20s linear infinite;
-	}
 	.private-center {
-		position: absolute;
+		position: static;
 		z-index: 1;
-		top: 82%;
 		display: grid;
 		justify-items: center;
 		gap: 5px;
-		transform: translate(-50%, -50%);
-		border: 1px solid rgba(255, 250, 244, 0.9);
-		border-radius: 14px;
-		background: rgba(255, 250, 244, 0.84);
-		padding: 12px 16px;
-		box-shadow: 0 8px 24px rgba(57, 40, 25, 0.13);
+		flex: 1 1 auto;
+		min-width: min(220px, 100%);
+		border: none;
+		border-radius: 12px;
+		background: none;
+		padding: 2px 4px;
+		box-shadow: none;
 	}
-	.private-center > span {
-		color: #d96d49;
-		font-size: 27px;
+	.private-center-line {
+		display: flex;
+		align-items: baseline;
+		justify-content: center;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 	.private-center strong {
 		color: #51473e;
-		font-size: 14px;
+		font-size: 13px;
 	}
 	.private-center small {
 		color: #978b7f;
 		font-size: 10px;
 	}
+	.private-center-note {
+		opacity: 0.75;
+	}
 	.map-legend {
-		position: absolute;
-		right: 14px;
-		top: 14px;
-		left: auto;
+		position: static;
+		z-index: 2;
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		flex: 0 0 auto;
+		max-width: calc(100% - 24px);
 		border: 1px solid rgba(255, 255, 255, 0.72);
 		border-radius: 10px;
 		background: rgba(255, 253, 249, 0.9);
-		padding: 9px 11px;
+		padding: 7px 10px;
 		color: #84786c;
 		font-size: 10px;
 		font-weight: 700;
 		box-shadow: 0 5px 20px rgba(57, 40, 25, 0.1);
 	}
 	.private-legend {
-		bottom: auto;
-		max-width: min(300px, calc(100% - 28px));
+		max-width: min(320px, calc(100% - 24px));
 		flex-wrap: wrap;
-		row-gap: 4px;
+		row-gap: 3px;
 		border-color: rgba(255, 255, 255, 0.88);
 		background: rgba(255, 250, 244, 0.94);
 		color: #5f5147;
@@ -1210,32 +1223,8 @@
 		z-index: 6 !important;
 		pointer-events: none;
 	}
-	.private-signal {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		width: 116px;
-		height: 116px;
-		border: 1px solid rgba(217, 109, 73, 0.22);
-		border-radius: 50%;
-		transform: translate(-50%, -50%);
-		animation: signal-expand 3.2s ease-out infinite;
-		pointer-events: none;
-	}
-	:global(.private-center.arrived .private-signal),
-	:global(.private-center.lost .private-signal) {
-		animation-play-state: paused;
-		opacity: 0.35;
-	}
-	.private-center > span {
-		animation: star-float 2.4s ease-in-out infinite;
-	}
-	.private-center.arrived > span,
-	.private-center.lost > span {
-		animation: none;
-	}
 	.private-progress {
-		width: min(180px, 70vw);
+		width: min(200px, 100%);
 		height: 4px;
 		margin-top: 5px;
 		overflow: hidden;
@@ -1288,14 +1277,6 @@
 			opacity: 1;
 		}
 	}
-	@keyframes private-grid-drift {
-		from {
-			background-position: 0 0;
-		}
-		to {
-			background-position: 44px 44px;
-		}
-	}
 	@keyframes route-dash {
 		to {
 			stroke-dashoffset: -52px;
@@ -1310,45 +1291,10 @@
 			opacity: 1;
 		}
 	}
-	@keyframes signal-expand {
-		0% {
-			opacity: 0.7;
-			transform: translate(-50%, -50%) scale(0.72);
-		}
-		70%,
-		100% {
-			opacity: 0;
-			transform: translate(-50%, -50%) scale(1.35);
-		}
-	}
-	@keyframes star-float {
-		0%,
-		100% {
-			transform: translateY(0) rotate(0);
-		}
-		50% {
-			transform: translateY(-4px) rotate(8deg);
-		}
-	}
 	.private-map :global(.leaflet-overlay-pane path[stroke='#c36040']) {
 		animation:
 			route-dash 1.8s linear infinite,
 			route-breathe 2.8s ease-in-out infinite;
-	}
-	/* Keep journey card away from moving bird and route corridor. */
-	.private-map > .private-center {
-		top: 16%;
-		left: 16px;
-		transform: none;
-		justify-items: start;
-		width: min(230px, calc(100% - 32px));
-		padding: 10px 13px;
-	}
-	.private-map > .private-center > span {
-		font-size: 20px;
-	}
-	.private-map > .private-center .private-progress {
-		width: min(150px, 100%);
 	}
 	.private-map :global(.leaflet-overlay-pane path[stroke='#c36040']) {
 		filter: drop-shadow(0 0 2px rgba(255, 250, 245, 0.96));
@@ -1356,10 +1302,7 @@
 	@media (prefers-reduced-motion: reduce) {
 		.private-bird,
 		.private-bird .bird-svg .bird-wing,
-		.private-map-wash,
-		.private-grid,
-		.private-signal,
-		.private-center > span {
+		.private-map-wash {
 			animation: none !important;
 			transition: none !important;
 		}
