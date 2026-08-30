@@ -130,37 +130,27 @@
 							});
 						leaflet
 							.polyline(buildPlanRoute(origin, destination, sameCity), {
-								color: '#b9ab9c',
-								weight: 3,
-								dashArray: '2 9',
+								color: '#6f5c47',
+								weight: 2.5,
+								dashArray: '3 8',
 								lineCap: 'round',
-								opacity: 0.8
-							})
-							.addTo(map);
-						leaflet
-							.polyline(buildWanderRoute(origin, destination, sameCity), {
-								color: '#e7c9b6',
-								weight: 4,
-								dashArray: '1 11',
-								lineCap: 'round',
-								opacity: 0.65
+								opacity: 0.9
 							})
 							.addTo(map);
 						privateTrailUnderlay = leaflet
 							.polyline([], {
 								color: '#fffaf5',
-								weight: 13,
-								opacity: 0.85,
+								weight: 12,
+								opacity: 0.9,
 								lineCap: 'round'
 							})
 							.addTo(map);
 						privateTrail = leaflet
 							.polyline([], {
-								color: '#3f7f6b',
-								weight: 6,
-								dashArray: '1 9',
+								color: '#2f7a5f',
+								weight: 5,
 								lineCap: 'round',
-								opacity: 1
+								opacity: 0.95
 							})
 							.addTo(map);
 					}
@@ -173,9 +163,11 @@
 							return;
 						}
 						// Fit to the wander route (not just origin/destination) so the
-						// bird's free-roaming loops stay inside the visible frame.
+						// bird's free-roaming loops stay inside the visible frame, with
+						// extra bottom padding so the bird marker never gets clipped.
 						map?.fitBounds(privateRoutePoints.length ? privateRoutePoints : [origin, destination], {
-							padding: [34, 34],
+							paddingTopLeft: [34, 34],
+							paddingBottomRight: [34, 60],
 							maxZoom: 10,
 							animate: false
 						});
@@ -553,16 +545,19 @@
 							aria-hidden="true"
 						>
 							<svg class="bird-svg" viewBox="0 0 72 52" role="img" aria-label="Burung carrier">
-								<path class="bird-tail" d="M18 31 3 23l9 12-7 10 17-7z" />
-								<ellipse class="bird-body" cx="35" cy="29" rx="19" ry="12" />
-								<circle class="bird-head" cx="50" cy="20" r="10" />
-								<path class="bird-beak" d="m58 19 13 5-13 5z" />
-								<circle class="bird-eye" cx="53" cy="17" r="2" />
-								<path class="bird-wing bird-wing-left" d="M35 25C25 8 14 8 10 13c8 2 14 8 18 17z" />
+								<path class="bird-tail" d="M24 29 2 20 11 30 2 40 24 33Z" />
+								<path class="bird-wing bird-wing-left" d="M38 24C27 5 10 1 2 9c13 0 24 6 34 21Z" />
 								<path
 									class="bird-wing bird-wing-right"
-									d="M36 27C27 12 18 15 15 21c8 0 13 4 18 12z"
+									d="M40 29C31 13 15 10 5 19c12-1 23 3 33 17Z"
 								/>
+								<path
+									class="bird-body"
+									d="M20 31C20 24 27 19 36 19c8 0 14 3 17 8 1 2 1 4-1 5-3 5-9 8-16 8-9 0-16-4-16-9Z"
+								/>
+								<circle class="bird-head" cx="50" cy="22" r="7.5" />
+								<path class="bird-beak" d="M56.5 21 68 23.5 56.5 26Z" />
+								<circle class="bird-eye" cx="52.4" cy="20.2" r="1.5" />
 							</svg>
 						</div>
 						<div
@@ -924,10 +919,10 @@
 		color: #5f5147;
 	}
 	.legend-line-plan {
-		background: repeating-linear-gradient(90deg, #b9ab9c 0 2px, transparent 2px 6px);
+		background: repeating-linear-gradient(90deg, #6f5c47 0 3px, transparent 3px 6px);
 	}
 	.legend-line-trail {
-		background: repeating-linear-gradient(90deg, #3f7f6b 0 4px, transparent 4px 6px);
+		background: #2f7a5f;
 	}
 	.legend-dot {
 		width: 8px;
@@ -1049,24 +1044,24 @@
 	}
 	.private-bird {
 		z-index: 5;
-		width: 72px;
-		height: 52px;
+		width: 116px;
+		height: 84px;
 		background: transparent;
 		box-shadow: none;
 	}
 	.private-bird::after {
-		left: 12px;
-		top: 36px;
-		width: 42px;
-		height: 9px;
+		left: 20px;
+		top: 58px;
+		width: 68px;
+		height: 13px;
 	}
 	.private-bird .bird-svg {
 		position: relative;
 		display: block;
-		width: 72px;
-		height: 52px;
+		width: 116px;
+		height: 84px;
 		overflow: visible;
-		filter: drop-shadow(0 5px 4px rgba(72, 38, 26, 0.26));
+		filter: drop-shadow(0 6px 5px rgba(72, 38, 26, 0.28));
 	}
 	.private-bird .bird-svg .bird-body,
 	.private-bird .bird-svg .bird-head {
