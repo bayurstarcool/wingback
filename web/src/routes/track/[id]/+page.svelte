@@ -299,19 +299,37 @@
 		sameCity: boolean
 	) {
 		if (sameCity)
-			return [origin, [origin[0] + 0.12, origin[1] + 0.16], origin] as Array<[number, number]>;
-		const bend = Math.max(0.18, Math.min(0.5, Math.abs(destination[1] - origin[1]) * 0.22));
-		const mid: [number, number] = [
-			(origin[0] + destination[0]) / 2 + bend,
-			(origin[1] + destination[1]) / 2
-		];
+			return [
+				origin,
+				[origin[0] + 0.08, origin[1] + 0.13],
+				[origin[0] - 0.04, origin[1] + 0.2],
+				[origin[0] - 0.08, origin[1] + 0.08],
+				origin
+			] as Array<[number, number]>;
+
+		// Coarse journey only: wander around city anchors, never around user GPS.
+		const deltaLat = destination[0] - origin[0];
+		const deltaLng = destination[1] - origin[1];
+		const length = Math.max(0.001, Math.hypot(deltaLat, deltaLng));
+		const normalLat = -deltaLng / length;
+		const normalLng = deltaLat / length;
+		const seed = Math.abs(Math.sin(origin[0] * 17.3 + destination[1] * 9.1));
+		const amplitude = Math.min(0.26, Math.max(0.08, length * 0.2));
 		const points: Array<[number, number]> = [];
-		for (let index = 0; index <= 24; index += 1) {
-			const t = index / 24;
-			const inverse = 1 - t;
+
+		for (let index = 0; index <= 32; index += 1) {
+			const t = index / 32;
+			const eased = t * t * (3 - 2 * t);
+			const lateral =
+				Math.sin(t * Math.PI * (2.2 + seed * 1.1) + seed * Math.PI) *
+					amplitude *
+					Math.sin(Math.PI * t) +
+				Math.sin(t * Math.PI * 5.2 + seed) * amplitude * 0.28 * Math.sin(Math.PI * t);
+			const forward =
+				Math.sin(t * Math.PI * 2.6 + seed * 2) * amplitude * 0.12 * Math.sin(Math.PI * t);
 			points.push([
-				inverse * inverse * origin[0] + 2 * inverse * t * mid[0] + t * t * destination[0],
-				inverse * inverse * origin[1] + 2 * inverse * t * mid[1] + t * t * destination[1]
+				origin[0] + deltaLat * eased + normalLat * lateral + deltaLat * forward,
+				origin[1] + deltaLng * eased + normalLng * lateral + deltaLng * forward
 			]);
 		}
 		return points;
@@ -455,9 +473,18 @@
 							style={`left: ${privateBird.x}%; top: ${privateBird.y}%; transform: translate(-50%, -50%) rotate(${privateBird.rotation}deg);`}
 							aria-hidden="true"
 						>
-							<span class="bird-body">◆</span>
-							<span class="bird-wing bird-wing-left"></span>
-							<span class="bird-wing bird-wing-right"></span>
+							<svg class="bird-svg" viewBox="0 0 72 52" role="img" aria-label="Burung carrier">
+								<path class="bird-tail" d="M18 31 3 23l9 12-7 10 17-7z" />
+								<ellipse class="bird-body" cx="35" cy="29" rx="19" ry="12" />
+								<circle class="bird-head" cx="50" cy="20" r="10" />
+								<path class="bird-beak" d="m58 19 13 5-13 5z" />
+								<circle class="bird-eye" cx="53" cy="17" r="2" />
+								<path class="bird-wing bird-wing-left" d="M35 25C25 8 14 8 10 13c8 2 14 8 18 17z" />
+								<path
+									class="bird-wing bird-wing-right"
+									d="M36 27C27 12 18 15 15 21c8 0 13 4 18 12z"
+								/>
+							</svg>
 						</div>
 						<div
 							class="private-center"
@@ -739,6 +766,10 @@
 		z-index: 3;
 		pointer-events: none;
 	}
+	.private-map > .private-bird {
+		z-index: 5;
+		pointer-events: none;
+	}
 	.private-map :global(.city-label) {
 		border: 1px solid rgba(104, 82, 65, 0.42);
 		border-radius: 99px;
@@ -833,51 +864,166 @@
 	.private-bird {
 		position: absolute;
 		z-index: 4;
-		width: 30px;
-		height: 30px;
-		border: 2px solid #fffaf5;
-		border-radius: 50%;
-		background: rgba(217, 109, 73, 0.16);
-		box-shadow:
-			0 5px 16px rgba(168, 78, 47, 0.3),
-			0 0 0 6px rgba(217, 109, 73, 0.14);
-		color: #b54f32;
-		font-size: 14px;
-		font-weight: 800;
-		line-height: 23px;
-		text-align: center;
+		width: 46px;
+		height: 42px;
 		pointer-events: none;
 		transition:
 			left 0.35s linear,
 			top 0.35s linear;
 		animation: bird-bob 0.9s ease-in-out infinite alternate;
 	}
+	.private-bird::after {
+		content: '';
+		position: absolute;
+		left: 10px;
+		top: 21px;
+		width: 28px;
+		height: 10px;
+		border-radius: 50%;
+		background: rgba(168, 78, 47, 0.2);
+		filter: blur(4px);
+	}
 	.private-bird .bird-body {
 		position: absolute;
-		inset: 4px 8px;
-		transform: rotate(90deg);
-		line-height: 18px;
+		left: 13px;
+		top: 12px;
+		width: 24px;
+		height: 17px;
+		border-radius: 58% 52% 48% 55%;
+		background: #b54f32;
+		box-shadow: inset -3px -2px 0 rgba(91, 45, 31, 0.2);
+	}
+	.private-bird .bird-body::before {
+		content: '';
+		position: absolute;
+		left: -4px;
+		top: -7px;
+		width: 17px;
+		height: 17px;
+		border-radius: 55% 52% 48% 50%;
+		background: #d96d49;
+	}
+	.private-bird .bird-eye {
+		position: absolute;
+		z-index: 2;
+		left: 8px;
+		top: -3px;
+		width: 4px;
+		height: 4px;
+		border-radius: 50%;
+		background: #302820;
+	}
+	.private-bird .bird-beak {
+		position: absolute;
+		z-index: 2;
+		left: -11px;
+		top: 2px;
+		width: 0;
+		height: 0;
+		border-top: 4px solid transparent;
+		border-bottom: 4px solid transparent;
+		border-right: 10px solid #e2a13f;
+	}
+	.private-bird .bird-tail {
+		position: absolute;
+		left: 30px;
+		top: 17px;
+		width: 15px;
+		height: 12px;
+		background: #8f3e2b;
+		clip-path: polygon(0 50%, 100% 0, 76% 50%, 100% 100%);
 	}
 	.private-bird .bird-wing {
 		position: absolute;
-		top: 12px;
-		width: 12px;
-		height: 6px;
-		border-radius: 100% 0;
-		background: #d96d49;
+		z-index: 3;
+		top: 5px;
+		width: 25px;
+		height: 14px;
+		border-radius: 85% 15% 70% 20%;
+		background: #c36040;
+		transform-origin: 88% 78%;
 		animation: wing-flap 0.38s ease-in-out infinite alternate;
 	}
 	.private-bird .bird-wing-left {
-		left: -5px;
-		transform: rotate(24deg);
+		left: 1px;
+		transform: rotate(20deg);
 	}
 	.private-bird .bird-wing-right {
-		right: -5px;
-		transform: scaleX(-1) rotate(24deg);
+		left: 17px;
+		transform: scaleX(-1) rotate(20deg);
+	}
+	.private-bird.arrived .bird-body,
+	.private-bird.arrived .bird-wing {
+		background: #4c7a5c;
 	}
 	.private-bird.arrived {
-		background: #4c7a5c;
 		animation: bird-arrived 1.6s ease-in-out infinite;
+	}
+	.private-bird {
+		z-index: 5;
+		width: 72px;
+		height: 52px;
+		background: transparent;
+		box-shadow: none;
+	}
+	.private-bird::after {
+		left: 12px;
+		top: 36px;
+		width: 42px;
+		height: 9px;
+	}
+	.private-bird .bird-svg {
+		position: relative;
+		display: block;
+		width: 72px;
+		height: 52px;
+		overflow: visible;
+		filter: drop-shadow(0 5px 4px rgba(72, 38, 26, 0.26));
+	}
+	.private-bird .bird-svg .bird-body,
+	.private-bird .bird-svg .bird-head {
+		position: static;
+		width: auto;
+		height: auto;
+		fill: #b54f32;
+		stroke: #fffaf5;
+		stroke-width: 1.5;
+	}
+	.private-bird .bird-svg .bird-tail {
+		position: static;
+		width: auto;
+		height: auto;
+		fill: #8f3e2b;
+		stroke: #fffaf5;
+		stroke-width: 1.2;
+	}
+	.private-bird .bird-svg .bird-beak {
+		fill: #e2a13f;
+		stroke: #fffaf5;
+		stroke-width: 1;
+	}
+	.private-bird .bird-svg .bird-eye {
+		fill: #302820;
+	}
+	.private-bird .bird-svg .bird-wing {
+		position: static;
+		width: auto;
+		height: auto;
+		fill: #d96d49;
+		stroke: #fffaf5;
+		stroke-width: 1.2;
+		transform-box: fill-box;
+		transform-origin: 80% 80%;
+		animation: wing-flap 0.38s ease-in-out infinite alternate;
+	}
+	.private-bird.arrived .bird-svg .bird-body,
+	.private-bird.arrived .bird-svg .bird-head,
+	.private-bird.arrived .bird-svg .bird-wing {
+		fill: #4c7a5c;
+	}
+	.private-map > .private-bird {
+		z-index: 6 !important;
+		pointer-events: none;
 	}
 	.private-signal {
 		position: absolute;
@@ -1003,6 +1149,35 @@
 		animation:
 			route-dash 1.8s linear infinite,
 			route-breathe 2.8s ease-in-out infinite;
+	}
+	/* Keep journey card away from moving bird and route corridor. */
+	.private-map > .private-center {
+		top: 16%;
+		left: 16px;
+		transform: none;
+		justify-items: start;
+		width: min(230px, calc(100% - 32px));
+		padding: 10px 13px;
+	}
+	.private-map > .private-center > span {
+		font-size: 20px;
+	}
+	.private-map > .private-center .private-progress {
+		width: min(150px, 100%);
+	}
+	.private-map :global(.leaflet-overlay-pane path[stroke='#c36040']) {
+		filter: drop-shadow(0 0 2px rgba(255, 250, 245, 0.96));
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.private-bird,
+		.private-bird .bird-svg .bird-wing,
+		.private-map-wash,
+		.private-grid,
+		.private-signal,
+		.private-center > span {
+			animation: none !important;
+			transition: none !important;
+		}
 	}
 	.track-side {
 		display: grid;
