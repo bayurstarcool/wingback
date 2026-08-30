@@ -77,7 +77,7 @@
 							: origin;
 					leaflet
 						.circle(origin, {
-							radius: sameCity ? 28000 : 30000,
+							radius: sameCity ? 16000 : 12000,
 							color: '#8c5f4b',
 							weight: 3,
 							fillColor: '#e7bda9',
@@ -101,7 +101,7 @@
 					if (!sameCity) {
 						leaflet
 							.circle(destination, {
-								radius: 30000,
+								radius: 12000,
 								color: '#b54f32',
 								weight: 3,
 								fillColor: '#e9aa95',
