@@ -23,8 +23,11 @@
 	let privatePhase = $state('Berangkat');
 	let privateBird = $state({ x: 50, y: 50, rotation: 0 });
 	let privateBirdFacing = 0;
+	let privateMapOrigin: [number, number] | null = null;
+	let privateMapDestination: [number, number] | null = null;
 	let privateRoutePoints = $state<Array<[number, number]>>([]);
 	let privateAnimationFrame: number | null = null;
+	let privateMapResizeObserver: ResizeObserver | null = null;
 	let shareNote = $state('');
 
 	onMount(async () => {
@@ -56,14 +59,22 @@
 					.map(privateMapEl, {
 						zoomControl: true,
 						attributionControl: true,
-						dragging: false,
+						dragging: true,
+						inertia: true,
+						inertiaDeceleration: 2800,
+						worldCopyJump: false,
 						scrollWheelZoom: true,
 						doubleClickZoom: true,
 						boxZoom: true,
 						touchZoom: true,
 						keyboard: true,
+						zoomAnimation: true,
+						fadeAnimation: true,
+						markerZoomAnimation: true,
 						zoomSnap: 0.5,
 						zoomDelta: 1,
+						wheelDebounceTime: 40,
+						wheelPxPerZoomLevel: 80,
 						minZoom: 4,
 						maxZoom: 12
 					})
@@ -71,7 +82,8 @@
 				leaflet
 					.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 						attribution: '© OpenStreetMap',
-						maxZoom: 6
+						maxZoom: 19,
+						maxNativeZoom: 19
 					})
 					.addTo(map);
 				if (msg.from_map_lat != null && msg.from_map_lng != null) {
@@ -81,6 +93,8 @@
 						!sameCity && msg.to_map_lat != null && msg.to_map_lng != null
 							? [msg.to_map_lat, msg.to_map_lng]
 							: origin;
+					privateMapOrigin = origin;
+					privateMapDestination = destination;
 					leaflet
 						.circle(origin, {
 							radius: sameCity ? 16000 : 12000,
@@ -131,13 +145,23 @@
 						const planRoutePoints = buildPlanRoute(origin, destination, sameCity);
 						leaflet
 							.polyline(planRoutePoints, {
-								color: '#6f5c47',
-								weight: 2.5,
-								dashArray: '3 8',
+								color: '#fffaf5',
+								weight: 7,
 								lineCap: 'round',
-								opacity: 0.9
+								lineJoin: 'round',
+								opacity: 0.9,
+								interactive: false
 							})
 							.addTo(map);
+						leaflet.polyline(planRoutePoints, {
+							color: '#6f5c47',
+							weight: 2.5,
+							dashArray: '3 8',
+							lineCap: 'round',
+							lineJoin: 'round',
+							interactive: false,
+							opacity: 0.9
+						});
 						// Direction chevrons along the plan route: a lightweight indicator
 						// of travel direction, separate from the dashed guide line itself.
 						if (!sameCity) {
@@ -176,7 +200,8 @@
 						privateTrail = leaflet
 							.polyline([], {
 								color: '#2f7a5f',
-								weight: 5,
+								weight: 6,
+								lineJoin: 'round',
 								lineCap: 'round',
 								opacity: 0.95
 							})
@@ -213,6 +238,11 @@
 					};
 					fitRoute();
 					requestAnimationFrame(fitRoute);
+					privateMapResizeObserver = new ResizeObserver(() => {
+						map?.invalidateSize({ pan: false });
+						requestAnimationFrame(fitRoute);
+					});
+					privateMapResizeObserver.observe(privateMapEl);
 				}
 			}
 			privateProgress = flightProgress(msg);
@@ -241,7 +271,27 @@
 
 		const start: [number, number] = [msg.sender_lat, msg.sender_lng];
 		const end: [number, number] = [msg.recipient_lat, msg.recipient_lng];
-		map = leaflet.map(mapEl, { zoomControl: false, attributionControl: true });
+		map = leaflet.map(mapEl, {
+			zoomControl: false,
+			attributionControl: true,
+			dragging: true,
+			inertia: true,
+			inertiaDeceleration: 2800,
+			scrollWheelZoom: true,
+			doubleClickZoom: true,
+			boxZoom: true,
+			touchZoom: true,
+			keyboard: true,
+			zoomAnimation: true,
+			fadeAnimation: true,
+			markerZoomAnimation: true,
+			zoomSnap: 0.5,
+			zoomDelta: 1,
+			wheelDebounceTime: 40,
+			wheelPxPerZoomLevel: 80,
+			minZoom: 3,
+			maxZoom: 19
+		});
 		leaflet.control.zoom({ position: 'bottomright' }).addTo(map);
 		leaflet
 			.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -344,6 +394,8 @@
 		streamCleanup?.();
 		stopCountdown();
 		map?.remove();
+		privateMapResizeObserver?.disconnect();
+		privateMapResizeObserver = null;
 		if (privateAnimationFrame) cancelAnimationFrame(privateAnimationFrame);
 	});
 
@@ -484,6 +536,23 @@
 		// above must never leave the bird short of the real destination.
 		points[points.length - 1] = destination;
 		return points;
+	}
+
+	function resetPrivateMapView() {
+		if (!map || !privateMapOrigin) return;
+		if (privateMapDestination && privateMapDestination !== privateMapOrigin) {
+			map.fitBounds(
+				privateRoutePoints.length ? privateRoutePoints : [privateMapOrigin, privateMapDestination],
+				{
+					paddingTopLeft: [34, 34],
+					paddingBottomRight: [34, 60],
+					maxZoom: 10,
+					animate: true
+				}
+			);
+			return;
+		}
+		map.setView(privateMapOrigin, 11, { animate: true });
 	}
 
 	function updatePrivateBird(progress: number) {
@@ -641,6 +710,16 @@
 				{#if msg.location_privacy === 'hidden'}
 					<div class="private-map" aria-label="Peta area privat">
 						<div bind:this={privateMapEl} class="private-map-tiles"></div>
+						<div class="private-map-tools" aria-label="Kontrol tampilan peta">
+							<button
+								type="button"
+								onclick={(event) => {
+									event.stopPropagation();
+									resetPrivateMapView();
+								}}
+								aria-label="Lihat seluruh rute">⌖ <span>Rute penuh</span></button
+							>
+						</div>
 						<div class="private-map-wash"></div>
 						<div
 							class="private-bird"
@@ -942,6 +1021,12 @@
 	.private-map-tiles {
 		opacity: 0.74;
 		filter: saturate(0.76) sepia(0.1) contrast(1.02);
+		touch-action: none;
+		overscroll-behavior: contain;
+		cursor: grab;
+	}
+	.private-map-tiles:global(.leaflet-dragging) {
+		cursor: grabbing;
 	}
 	.private-map-wash {
 		z-index: 0;
@@ -957,6 +1042,41 @@
 	.private-map > .private-bird {
 		z-index: 5;
 		pointer-events: none;
+	}
+	.private-map > .private-map-tools {
+		position: absolute;
+		top: 14px;
+		right: 14px;
+		z-index: 8;
+		pointer-events: auto;
+	}
+	.private-map-tools button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		min-width: 44px;
+		min-height: 44px;
+		border: 1px solid rgba(104, 82, 65, 0.22);
+		border-radius: 12px;
+		background: rgba(255, 250, 244, 0.95);
+		padding: 8px 11px;
+		color: #554a40;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 800;
+		box-shadow: 0 6px 16px rgba(57, 40, 25, 0.16);
+		cursor: pointer;
+	}
+	.private-map-tools button:hover,
+	.private-map-tools button:focus-visible {
+		border-color: rgba(111, 92, 71, 0.5);
+		background: #fffaf5;
+		outline: 3px solid rgba(217, 109, 73, 0.22);
+		outline-offset: 2px;
+	}
+	.private-map-tools button span {
+		white-space: nowrap;
 	}
 	.private-map :global(.city-label) {
 		border: 1px solid rgba(104, 82, 65, 0.42);
@@ -1529,22 +1649,28 @@
 	}
 	:global(.leaflet-container) {
 		font-family: inherit;
+		touch-action: none;
+		overscroll-behavior: contain;
 	}
-	.track-map :global(.leaflet-control-zoom a) {
+	.track-map :global(.leaflet-control-zoom a),
+	.private-map :global(.leaflet-control-zoom a) {
 		color: #554a40;
+		width: 44px;
+		height: 44px;
+		line-height: 42px;
 	}
+	.track-map :global(.leaflet-control-zoom),
 	.private-map :global(.leaflet-control-zoom) {
-		margin-top: 58px;
-		margin-left: 14px;
 		border: 1px solid rgba(104, 82, 65, 0.2);
 		border-radius: 10px;
 		overflow: hidden;
 		box-shadow: 0 5px 16px rgba(57, 40, 25, 0.14);
 	}
+	.private-map :global(.leaflet-control-zoom) {
+		margin-top: 68px;
+		margin-left: 14px;
+	}
 	.private-map :global(.leaflet-control-zoom a) {
-		width: 30px;
-		height: 30px;
-		line-height: 28px;
 		border-color: rgba(104, 82, 65, 0.16);
 		background: rgba(255, 250, 244, 0.94);
 		color: #554a40;
@@ -1582,11 +1708,27 @@
 		.track-layout {
 			grid-template-columns: 1fr;
 		}
-		.map-panel,
 		.track-map,
 		.private-map {
-			min-height: 320px;
 			height: 320px;
+		}
+		.map-panel {
+			height: auto;
+			min-height: 0;
+		}
+		.map-footer {
+			align-items: stretch;
+			flex-direction: column;
+			gap: 7px;
+		}
+		.private-center {
+			min-width: 0;
+			width: 100%;
+		}
+		.map-legend,
+		.private-legend {
+			max-width: 100%;
+			width: 100%;
 		}
 		.map-legend {
 			overflow-x: auto;
