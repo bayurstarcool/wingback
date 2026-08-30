@@ -455,7 +455,9 @@
 							style={`left: ${privateBird.x}%; top: ${privateBird.y}%; transform: translate(-50%, -50%) rotate(${privateBird.rotation}deg);`}
 							aria-hidden="true"
 						>
-							⌁
+							<span class="bird-body">◆</span>
+							<span class="bird-wing bird-wing-left"></span>
+							<span class="bird-wing bird-wing-right"></span>
 						</div>
 						<div
 							class="private-center"
@@ -835,12 +837,12 @@
 		height: 30px;
 		border: 2px solid #fffaf5;
 		border-radius: 50%;
-		background: #d96d49;
+		background: rgba(217, 109, 73, 0.16);
 		box-shadow:
 			0 5px 16px rgba(168, 78, 47, 0.3),
 			0 0 0 6px rgba(217, 109, 73, 0.14);
-		color: #fffaf5;
-		font-size: 25px;
+		color: #b54f32;
+		font-size: 14px;
 		font-weight: 800;
 		line-height: 23px;
 		text-align: center;
@@ -849,6 +851,29 @@
 			left 0.35s linear,
 			top 0.35s linear;
 		animation: bird-bob 0.9s ease-in-out infinite alternate;
+	}
+	.private-bird .bird-body {
+		position: absolute;
+		inset: 4px 8px;
+		transform: rotate(90deg);
+		line-height: 18px;
+	}
+	.private-bird .bird-wing {
+		position: absolute;
+		top: 12px;
+		width: 12px;
+		height: 6px;
+		border-radius: 100% 0;
+		background: #d96d49;
+		animation: wing-flap 0.38s ease-in-out infinite alternate;
+	}
+	.private-bird .bird-wing-left {
+		left: -5px;
+		transform: rotate(24deg);
+	}
+	.private-bird .bird-wing-right {
+		right: -5px;
+		transform: scaleX(-1) rotate(24deg);
 	}
 	.private-bird.arrived {
 		background: #4c7a5c;
@@ -905,6 +930,14 @@
 		}
 		to {
 			margin-top: -4px;
+		}
+	}
+	@keyframes wing-flap {
+		from {
+			transform: rotate(18deg) scaleY(0.72);
+		}
+		to {
+			transform: rotate(34deg) scaleY(1.08);
 		}
 	}
 	@keyframes bird-arrived {
