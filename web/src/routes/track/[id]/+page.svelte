@@ -14,6 +14,8 @@
 	let leaflet: typeof import('leaflet') | null = null;
 	let map: import('leaflet').Map | null = null;
 	let carrierMarker: import('leaflet').CircleMarker | null = null;
+	let privateTrailUnderlay: import('leaflet').Polyline | null = null;
+	let privateTrail: import('leaflet').Polyline | null = null;
 	let countdownInterval: ReturnType<typeof setInterval> | null = null;
 	let streamCleanup: (() => void) | null = null;
 	let lastUpdated = $state('Menunggu koneksi live...');
@@ -21,6 +23,7 @@
 	let privatePhase = $state('Berangkat');
 	let privateBird = $state({ x: 50, y: 50, rotation: 0 });
 	let privateRoutePoints = $state<Array<[number, number]>>([]);
+	let privateTrailPoints: Array<[number, number]> = [];
 	let privateAnimationFrame: number | null = null;
 	let shareNote = $state('');
 
@@ -126,24 +129,42 @@
 								className: 'city-label'
 							});
 						leaflet
-							.polyline(buildPrivateRoute(origin, destination, sameCity), {
-								color: '#fffaf5',
-								weight: 16,
-								opacity: 0.92,
-								lineCap: 'round'
+							.polyline(buildPlanRoute(origin, destination, sameCity), {
+								color: '#b9ab9c',
+								weight: 3,
+								dashArray: '2 9',
+								lineCap: 'round',
+								opacity: 0.8
 							})
 							.addTo(map);
 						leaflet
-							.polyline(buildPrivateRoute(origin, destination, sameCity), {
-								color: '#c36040',
-								weight: 7,
-								dashArray: '15 11',
+							.polyline(buildWanderRoute(origin, destination, sameCity), {
+								color: '#e7c9b6',
+								weight: 4,
+								dashArray: '1 11',
+								lineCap: 'round',
+								opacity: 0.65
+							})
+							.addTo(map);
+						privateTrailUnderlay = leaflet
+							.polyline([], {
+								color: '#fffaf5',
+								weight: 13,
+								opacity: 0.85,
+								lineCap: 'round'
+							})
+							.addTo(map);
+						privateTrail = leaflet
+							.polyline([], {
+								color: '#3f7f6b',
+								weight: 6,
+								dashArray: '1 9',
 								lineCap: 'round',
 								opacity: 1
 							})
 							.addTo(map);
 					}
-					privateRoutePoints = buildPrivateRoute(origin, destination, sameCity);
+					privateRoutePoints = buildWanderRoute(origin, destination, sameCity);
 					updatePrivateBird(privateProgress);
 					const fitRoute = () => {
 						map?.invalidateSize({ pan: false });
@@ -293,7 +314,23 @@
 		if (privateAnimationFrame) cancelAnimationFrame(privateAnimationFrame);
 	});
 
-	function buildPrivateRoute(
+	// The "plan" is the intended path between city anchors: a light, mostly
+	// straight guide so the destination direction stays legible even while the
+	// bird wanders off it. It never carries real GPS, only city anchors.
+	function buildPlanRoute(
+		origin: [number, number],
+		destination: [number, number],
+		sameCity: boolean
+	) {
+		if (sameCity) return [origin, origin] as Array<[number, number]>;
+		const mid: [number, number] = [
+			(origin[0] + destination[0]) / 2,
+			(origin[1] + destination[1]) / 2
+		];
+		return [origin, mid, destination] as Array<[number, number]>;
+	}
+
+	function buildWanderRoute(
 		origin: [number, number],
 		destination: [number, number],
 		sameCity: boolean
@@ -353,6 +390,19 @@
 			y: point ? (point.y / height) * 100 : 50,
 			rotation: Math.atan2(next[1] - current[1], next[0] - current[0]) * (180 / Math.PI) - 90
 		};
+		growPrivateTrail([lat, lng]);
+	}
+
+	// Actual flown trail, separate from the static plan/wander guides. Drawn as
+	// a growing polyline behind the bird so it visually reads as "where it's
+	// been" rather than "where it's supposed to go".
+	function growPrivateTrail(point: [number, number]) {
+		const last = privateTrailPoints[privateTrailPoints.length - 1];
+		if (last && Math.abs(last[0] - point[0]) < 1e-6 && Math.abs(last[1] - point[1]) < 1e-6) return;
+		privateTrailPoints.push(point);
+		if (privateTrailPoints.length > 400) privateTrailPoints.shift();
+		privateTrailUnderlay?.setLatLngs(privateTrailPoints);
+		privateTrail?.setLatLngs(privateTrailPoints);
 	}
 
 	function startPrivateBirdAnimation() {
@@ -503,7 +553,8 @@
 				{/if}
 				{#if msg.location_privacy === 'hidden'}
 					<div class="map-legend private-legend">
-						<span class="legend-line"></span> Kota terlihat · GPS carrier tidak dibagikan
+						<span class="legend-line legend-line-plan"></span> Rencana rute
+						<span class="legend-line legend-line-trail"></span> Jejak burung · GPS tidak dibagikan
 					</div>
 				{:else}
 					<div class="map-legend">
@@ -837,9 +888,17 @@
 	.private-legend {
 		bottom: auto;
 		max-width: min(300px, calc(100% - 28px));
+		flex-wrap: wrap;
+		row-gap: 4px;
 		border-color: rgba(255, 255, 255, 0.88);
 		background: rgba(255, 250, 244, 0.94);
 		color: #5f5147;
+	}
+	.legend-line-plan {
+		background: repeating-linear-gradient(90deg, #b9ab9c 0 2px, transparent 2px 6px);
+	}
+	.legend-line-trail {
+		background: repeating-linear-gradient(90deg, #3f7f6b 0 4px, transparent 4px 6px);
 	}
 	.legend-dot {
 		width: 8px;
