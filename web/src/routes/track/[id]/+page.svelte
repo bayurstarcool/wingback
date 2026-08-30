@@ -19,6 +19,9 @@
 	let lastUpdated = $state('Menunggu koneksi live...');
 	let privateProgress = $state(0);
 	let privatePhase = $state('Berangkat');
+	let privateBird = $state({ x: 50, y: 50, rotation: 0 });
+	let privateRoutePoints = $state<Array<[number, number]>>([]);
+	let privateAnimationFrame: number | null = null;
 	let shareNote = $state('');
 
 	onMount(async () => {
@@ -123,7 +126,7 @@
 								className: 'city-label'
 							});
 						leaflet
-							.polyline([origin, destination], {
+							.polyline(buildPrivateRoute(origin, destination, sameCity), {
 								color: '#fffaf5',
 								weight: 16,
 								opacity: 0.92,
@@ -131,7 +134,7 @@
 							})
 							.addTo(map);
 						leaflet
-							.polyline([origin, destination], {
+							.polyline(buildPrivateRoute(origin, destination, sameCity), {
 								color: '#c36040',
 								weight: 7,
 								dashArray: '15 11',
@@ -140,6 +143,8 @@
 							})
 							.addTo(map);
 					}
+					privateRoutePoints = buildPrivateRoute(origin, destination, sameCity);
+					updatePrivateBird(privateProgress);
 					const fitRoute = () => {
 						map?.invalidateSize({ pan: false });
 						if (sameCity) {
@@ -158,6 +163,7 @@
 			}
 			privateProgress = flightProgress(msg);
 			privatePhase = phaseFor(privateProgress);
+			startPrivateBirdAnimation();
 			streamCleanup = streamMessage(id, handleLiveEvent);
 			countdownInterval = setInterval(() => {
 				if (msg && status === 'in_transit') {
@@ -225,6 +231,7 @@
 		if (event.type === 'progress') {
 			privateProgress = event.progress ?? privateProgress;
 			privatePhase = event.phase ?? phaseFor(privateProgress);
+			updatePrivateBird(privateProgress);
 			status = privateProgress >= 1 ? 'arrived' : 'in_transit';
 			if (privatePhase === 'Perjalanan terhenti') status = 'lost';
 			if (status !== 'in_transit') stopCountdown();
@@ -283,7 +290,61 @@
 		streamCleanup?.();
 		stopCountdown();
 		map?.remove();
+		if (privateAnimationFrame) cancelAnimationFrame(privateAnimationFrame);
 	});
+
+	function buildPrivateRoute(
+		origin: [number, number],
+		destination: [number, number],
+		sameCity: boolean
+	) {
+		if (sameCity)
+			return [origin, [origin[0] + 0.12, origin[1] + 0.16], origin] as Array<[number, number]>;
+		const bend = Math.max(0.18, Math.min(0.5, Math.abs(destination[1] - origin[1]) * 0.22));
+		const mid: [number, number] = [
+			(origin[0] + destination[0]) / 2 + bend,
+			(origin[1] + destination[1]) / 2
+		];
+		const points: Array<[number, number]> = [];
+		for (let index = 0; index <= 24; index += 1) {
+			const t = index / 24;
+			const inverse = 1 - t;
+			points.push([
+				inverse * inverse * origin[0] + 2 * inverse * t * mid[0] + t * t * destination[0],
+				inverse * inverse * origin[1] + 2 * inverse * t * mid[1] + t * t * destination[1]
+			]);
+		}
+		return points;
+	}
+
+	function updatePrivateBird(progress: number) {
+		if (!privateRoutePoints.length) return;
+		const bounded = Math.max(0, Math.min(1, progress));
+		const position = bounded * (privateRoutePoints.length - 1);
+		const index = Math.min(privateRoutePoints.length - 2, Math.floor(position));
+		const fraction = position - index;
+		const current = privateRoutePoints[index];
+		const next = privateRoutePoints[index + 1];
+		const lat = current[0] + (next[0] - current[0]) * fraction;
+		const lng = current[1] + (next[1] - current[1]) * fraction;
+		const point = map?.latLngToContainerPoint([lat, lng]);
+		const width = privateMapEl?.clientWidth || 1;
+		const height = privateMapEl?.clientHeight || 1;
+		privateBird = {
+			x: point ? (point.x / width) * 100 : 50,
+			y: point ? (point.y / height) * 100 : 50,
+			rotation: Math.atan2(next[1] - current[1], next[0] - current[0]) * (180 / Math.PI) - 90
+		};
+	}
+
+	function startPrivateBirdAnimation() {
+		if (!msg || msg.location_privacy !== 'hidden') return;
+		const tick = () => {
+			if (status === 'in_transit') updatePrivateBird(privateProgress);
+			privateAnimationFrame = requestAnimationFrame(tick);
+		};
+		tick();
+	}
 
 	function statusTitle() {
 		if (status === 'arrived') return 'Pesan sudah tiba.';
@@ -388,6 +449,14 @@
 						<div class="private-map-wash"></div>
 						<div class="private-grid"></div>
 						<div class="private-signal" aria-hidden="true"></div>
+						<div
+							class="private-bird"
+							class:arrived={status === 'arrived'}
+							style={`left: ${privateBird.x}%; top: ${privateBird.y}%; transform: translate(-50%, -50%) rotate(${privateBird.rotation}deg);`}
+							aria-hidden="true"
+						>
+							⌁
+						</div>
 						<div
 							class="private-center"
 							class:arrived={status === 'arrived'}
@@ -759,6 +828,32 @@
 		margin-left: 6px;
 		background: repeating-linear-gradient(90deg, #d96d49 0 5px, transparent 5px 9px);
 	}
+	.private-bird {
+		position: absolute;
+		z-index: 4;
+		width: 30px;
+		height: 30px;
+		border: 2px solid #fffaf5;
+		border-radius: 50%;
+		background: #d96d49;
+		box-shadow:
+			0 5px 16px rgba(168, 78, 47, 0.3),
+			0 0 0 6px rgba(217, 109, 73, 0.14);
+		color: #fffaf5;
+		font-size: 25px;
+		font-weight: 800;
+		line-height: 23px;
+		text-align: center;
+		pointer-events: none;
+		transition:
+			left 0.35s linear,
+			top 0.35s linear;
+		animation: bird-bob 0.9s ease-in-out infinite alternate;
+	}
+	.private-bird.arrived {
+		background: #4c7a5c;
+		animation: bird-arrived 1.6s ease-in-out infinite;
+	}
 	.private-signal {
 		position: absolute;
 		top: 50%;
@@ -803,6 +898,23 @@
 	}
 	.private-center.lost .private-progress span {
 		background: #b25b4c;
+	}
+	@keyframes bird-bob {
+		from {
+			margin-top: 0;
+		}
+		to {
+			margin-top: -4px;
+		}
+	}
+	@keyframes bird-arrived {
+		0%,
+		100% {
+			scale: 1;
+		}
+		50% {
+			scale: 1.08;
+		}
 	}
 	@keyframes private-wash {
 		from {
