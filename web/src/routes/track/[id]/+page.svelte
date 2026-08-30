@@ -172,7 +172,9 @@
 							map?.setView(origin, 11, { animate: false });
 							return;
 						}
-						map?.fitBounds([origin, destination], {
+						// Fit to the wander route (not just origin/destination) so the
+						// bird's free-roaming loops stay inside the visible frame.
+						map?.fitBounds(privateRoutePoints.length ? privateRoutePoints : [origin, destination], {
 							padding: [34, 34],
 							maxZoom: 10,
 							animate: false
@@ -314,22 +316,39 @@
 		if (privateAnimationFrame) cancelAnimationFrame(privateAnimationFrame);
 	});
 
-	// The "plan" is the intended path between city anchors: a light, mostly
-	// straight guide so the destination direction stays legible even while the
-	// bird wanders off it. It never carries real GPS, only city anchors.
+	// The "plan" is the intended path between city anchors: a curved (never
+	// straight-line) guide so the destination direction stays legible even
+	// while the bird wanders freely off it. It never carries real GPS, only
+	// city anchors.
 	function buildPlanRoute(
 		origin: [number, number],
 		destination: [number, number],
 		sameCity: boolean
 	) {
-		if (sameCity) return [origin, origin] as Array<[number, number]>;
+		if (sameCity)
+			return [origin, [origin[0] + 0.12, origin[1] + 0.16], origin] as Array<[number, number]>;
+		const bend = Math.max(0.18, Math.min(0.5, Math.abs(destination[1] - origin[1]) * 0.22));
 		const mid: [number, number] = [
-			(origin[0] + destination[0]) / 2,
+			(origin[0] + destination[0]) / 2 + bend,
 			(origin[1] + destination[1]) / 2
 		];
-		return [origin, mid, destination] as Array<[number, number]>;
+		const points: Array<[number, number]> = [];
+		for (let index = 0; index <= 24; index += 1) {
+			const t = index / 24;
+			const inverse = 1 - t;
+			points.push([
+				inverse * inverse * origin[0] + 2 * inverse * t * mid[0] + t * t * destination[0],
+				inverse * inverse * origin[1] + 2 * inverse * t * mid[1] + t * t * destination[1]
+			]);
+		}
+		return points;
 	}
 
+	// The bird is free to wander however it likes relative to the plan route —
+	// looping, circling back, drifting wide — as long as it starts at the
+	// origin and lands exactly on the destination. This is deliberately much
+	// less constrained than buildPlanRoute: only city anchors are used, never
+	// real GPS, so the wandering carries no precise-location risk.
 	function buildWanderRoute(
 		origin: [number, number],
 		destination: [number, number],
@@ -338,9 +357,10 @@
 		if (sameCity)
 			return [
 				origin,
-				[origin[0] + 0.08, origin[1] + 0.13],
-				[origin[0] - 0.04, origin[1] + 0.2],
-				[origin[0] - 0.08, origin[1] + 0.08],
+				[origin[0] + 0.09, origin[1] + 0.14],
+				[origin[0] + 0.14, origin[1] - 0.05],
+				[origin[0] - 0.05, origin[1] + 0.22],
+				[origin[0] - 0.1, origin[1] + 0.07],
 				origin
 			] as Array<[number, number]>;
 
@@ -351,24 +371,33 @@
 		const normalLat = -deltaLng / length;
 		const normalLng = deltaLat / length;
 		const seed = Math.abs(Math.sin(origin[0] * 17.3 + destination[1] * 9.1));
-		const amplitude = Math.min(0.26, Math.max(0.08, length * 0.2));
+		const amplitude = Math.min(0.42, Math.max(0.14, length * 0.32));
 		const points: Array<[number, number]> = [];
 
-		for (let index = 0; index <= 32; index += 1) {
-			const t = index / 32;
+		for (let index = 0; index <= 48; index += 1) {
+			const t = index / 48;
 			const eased = t * t * (3 - 2 * t);
+			const envelope = Math.sin(Math.PI * t);
+			// Early loop: strong, high-frequency circling that fades out as the
+			// bird commits to the final approach, so it can "putar-putar" near
+			// departure without ever missing the destination.
+			const earlyLoop =
+				Math.sin(t * Math.PI * 7.4 + seed * 3.1) * amplitude * 1.5 * Math.pow(1 - t, 1.6);
 			const lateral =
-				Math.sin(t * Math.PI * (2.2 + seed * 1.1) + seed * Math.PI) *
-					amplitude *
-					Math.sin(Math.PI * t) +
-				Math.sin(t * Math.PI * 5.2 + seed) * amplitude * 0.28 * Math.sin(Math.PI * t);
+				Math.sin(t * Math.PI * (2.2 + seed * 1.1) + seed * Math.PI) * amplitude * envelope +
+				Math.sin(t * Math.PI * 5.2 + seed) * amplitude * 0.35 * envelope +
+				earlyLoop;
 			const forward =
-				Math.sin(t * Math.PI * 2.6 + seed * 2) * amplitude * 0.12 * Math.sin(Math.PI * t);
+				Math.sin(t * Math.PI * 2.6 + seed * 2) * amplitude * 0.22 * envelope +
+				Math.sin(t * Math.PI * 6.6 + seed * 1.7) * amplitude * 0.3 * Math.pow(1 - t, 1.4);
 			points.push([
 				origin[0] + deltaLat * eased + normalLat * lateral + deltaLat * forward,
 				origin[1] + deltaLng * eased + normalLng * lateral + deltaLng * forward
 			]);
 		}
+		// Guarantee exact arrival: floating point drift from the trig terms
+		// above must never leave the bird short of the real destination.
+		points[points.length - 1] = destination;
 		return points;
 	}
 
