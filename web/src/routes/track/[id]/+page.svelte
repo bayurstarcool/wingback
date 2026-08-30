@@ -24,7 +24,6 @@
 	let privateBird = $state({ x: 50, y: 50, rotation: 0 });
 	let privateBirdFacing = 0;
 	let privateRoutePoints = $state<Array<[number, number]>>([]);
-	let privateTrailPoints: Array<[number, number]> = [];
 	let privateAnimationFrame: number | null = null;
 	let shareNote = $state('');
 
@@ -505,19 +504,32 @@
 			y: point ? (point.y / height) * 100 : 50,
 			rotation: privateBirdFacing
 		};
-		growPrivateTrail([lat, lng]);
+		growPrivateTrail(bounded);
 	}
 
-	// Actual flown trail, separate from the static plan/wander guides. Drawn as
-	// a growing polyline behind the bird so it visually reads as "where it's
-	// been" rather than "where it's supposed to go".
-	function growPrivateTrail(point: [number, number]) {
-		const last = privateTrailPoints[privateTrailPoints.length - 1];
-		if (last && Math.abs(last[0] - point[0]) < 1e-6 && Math.abs(last[1] - point[1]) < 1e-6) return;
-		privateTrailPoints.push(point);
-		if (privateTrailPoints.length > 400) privateTrailPoints.shift();
-		privateTrailUnderlay?.setLatLngs(privateTrailPoints);
-		privateTrail?.setLatLngs(privateTrailPoints);
+	// Reconstruct the complete coarse trail prefix from the deterministic
+	// wander route. The old implementation appended only the latest position
+	// received from WebSocket, so sparse progress events made the trail look
+	// like a short straight segment. A trail is a history: render every sampled
+	// route point already passed, plus the current interpolated point. This is
+	// still city-anchor-only and never represents hidden GPS.
+	function growPrivateTrail(progress: number) {
+		if (!privateRoutePoints.length) return;
+		const bounded = Math.max(0, Math.min(1, progress));
+		const position = bounded * (privateRoutePoints.length - 1);
+		const endIndex = Math.min(privateRoutePoints.length - 1, Math.floor(position));
+		const trail = privateRoutePoints.slice(0, endIndex + 1);
+		const fraction = position - endIndex;
+		if (fraction > 0 && endIndex < privateRoutePoints.length - 1) {
+			const current = privateRoutePoints[endIndex];
+			const next = privateRoutePoints[endIndex + 1];
+			trail.push([
+				current[0] + (next[0] - current[0]) * fraction,
+				current[1] + (next[1] - current[1]) * fraction
+			]);
+		}
+		privateTrailUnderlay?.setLatLngs(trail);
+		privateTrail?.setLatLngs(trail);
 	}
 
 	function startPrivateBirdAnimation() {
